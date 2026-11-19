@@ -26,6 +26,40 @@ interface MachineRow {
   last_seen_at: Date | null;
 }
 
+function mapMachineRow(row: MachineRow): MachineRecord {
+  return {
+    id: row.id,
+    display_name: row.display_name,
+    zone: row.zone,
+    grid_row: row.grid_row,
+    grid_col: row.grid_col,
+    current_state: row.current_state,
+    active_error: row.active_error,
+    last_seen_at: row.last_seen_at ? row.last_seen_at.toISOString() : null,
+  };
+}
+
+/**
+ * Fetch all registered machines ordered deterministically by ID for the Worker Portal directory.
+ */
+export async function listMachines(db: Pool): Promise<MachineRecord[]> {
+  const result = await db.query<MachineRow>(
+    `SELECT
+       id,
+       display_name,
+       zone,
+       grid_row,
+       grid_col,
+       current_state,
+       active_error,
+       last_seen_at
+     FROM machines
+     ORDER BY id ASC`,
+  );
+
+  return result.rows.map(mapMachineRow);
+}
+
 /**
  * Fetch a single registered machine by ID, or return null if no matching row exists.
  */
@@ -55,14 +89,5 @@ export async function getMachineById(db: Pool, machineId: string): Promise<Machi
     return null;
   }
 
-  return {
-    id: row.id,
-    display_name: row.display_name,
-    zone: row.zone,
-    grid_row: row.grid_row,
-    grid_col: row.grid_col,
-    current_state: row.current_state,
-    active_error: row.active_error,
-    last_seen_at: row.last_seen_at ? row.last_seen_at.toISOString() : null,
-  };
+  return mapMachineRow(row);
 }
