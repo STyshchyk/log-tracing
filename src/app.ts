@@ -11,6 +11,7 @@ import { registerCoilsApi } from './routes/coils-api.js';
 import { registerEventsApi } from './routes/events-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
+import { registerWorkerGlossary } from './routes/worker-glossary.js';
 import { registerWorkerPortal } from './routes/worker-portal.js';
 
 /**
@@ -87,6 +88,7 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerEventsApi(app, deps.db);
   registerCoilsApi(app, deps.db);
   registerWorkerPortal(app, deps.db);
+  registerWorkerGlossary(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();
