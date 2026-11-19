@@ -3,7 +3,9 @@ import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { seedGlossary } from './db/seed-glossary.js';
+import { registerCoilIngestion } from './mqtt/coil-ingestion.js';
 import type { MqttTransport } from './mqtt/transport.js';
+import { registerCoilsApi } from './routes/coils-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 
 /**
@@ -71,7 +73,10 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
     },
   );
 
+  await registerCoilIngestion(deps.mqtt, deps.db, app.log);
+
   registerGlossaryApi(app, deps.db);
+  registerCoilsApi(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();
