@@ -1,5 +1,6 @@
 import { createApp } from './app.js';
 import { createDbPool, ensureSchema } from './db/pool.js';
+import { seedPilotMachines } from './db/seed-pilot-machines.js';
 import { createMosquittoTransport } from './mqtt/transport.js';
 
 const DATABASE_URL =
@@ -11,6 +12,7 @@ const PORT = Number(process.env.PORT ?? 3000);
 async function start(): Promise<void> {
   const db = createDbPool(DATABASE_URL);
   await ensureSchema(db);
+  await seedPilotMachines(db);
 
   const mqtt = createMosquittoTransport(MQTT_URL);
   const app = await createApp({ db, mqtt });
