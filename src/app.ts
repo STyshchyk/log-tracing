@@ -2,7 +2,9 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
+import { seedGlossary } from './db/seed-glossary.js';
 import type { MqttTransport } from './mqtt/transport.js';
+import { registerGlossaryApi } from './routes/glossary-api.js';
 
 /**
  * Top-level runtime dependencies injected at the application seam.
@@ -16,6 +18,8 @@ export interface AppDeps {
  * Build the Fastify application wired to PostgreSQL/TimescaleDB and MQTT transport.
  */
 export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
+  await seedGlossary(deps.db);
+
   const app = Fastify({ logger: false });
 
   await app.register(swagger, {
@@ -66,6 +70,8 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
       }
     },
   );
+
+  registerGlossaryApi(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();

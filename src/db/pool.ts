@@ -24,5 +24,16 @@ function resolveInitSqlPath(): string {
  */
 export async function ensureSchema(pool: Pool): Promise<void> {
   const sql = readFileSync(resolveInitSqlPath(), 'utf8');
-  await pool.query(sql);
+  const client = await pool.connect();
+
+  try {
+    await client.query('SELECT pg_advisory_lock(7391824)');
+    try {
+      await client.query(sql);
+    } finally {
+      await client.query('SELECT pg_advisory_unlock(7391824)');
+    }
+  } finally {
+    client.release();
+  }
 }
