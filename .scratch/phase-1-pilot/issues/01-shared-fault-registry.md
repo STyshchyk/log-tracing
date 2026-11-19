@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Registry includes initial winding-room fault definitions covering common shop-floor faults (fiber snap, tension fault, motor or subsystem timeout, bobbin jam, and controller brownout or watchdog reset).
-- [ ] Every entry defines a unique `error_code`, concise title, symptoms summary, and step-by-step plain-English Markdown fix instructions.
-- [ ] Automated validation verifies required fields, non-empty strings, and unique `error_code` keys, rejecting duplicate or malformed entries.
-- [ ] Registry format is flat JSON suitable for both C++ firmware enum generation and database Glossary seeding.
+- [x] Registry includes initial winding-room fault definitions covering common shop-floor faults (fiber snap, tension fault, motor or subsystem timeout, bobbin jam, and controller brownout or watchdog reset).
+- [x] Every entry defines a unique `error_code`, concise title, symptoms summary, and step-by-step plain-English Markdown fix instructions.
+- [x] Automated validation verifies required fields, non-empty strings, and unique `error_code` keys, rejecting duplicate or malformed entries.
+- [x] Registry format is flat JSON suitable for both C++ firmware enum generation and database Glossary seeding.

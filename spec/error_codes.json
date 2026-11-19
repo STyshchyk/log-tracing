@@ -1,0 +1,38 @@
+[
+  {
+    "error_code": "ERR_FIBER_SNAP",
+    "title": "Fiber Snap Detected",
+    "symptoms": "Strand tension dropped to zero during an active winding cycle and the winder paused or aborted.",
+    "fix_steps_md": "1. Press Stop on the touchscreen and verify the spool has come to a complete halt.\n2. Clear any loose fiberglass tail from the guide rollers and tension arm.\n3. Pull fresh strand from the supply creel through all ceramic eyelets.\n4. Tie or overlap the strand onto the target coil core and press Start."
+  },
+  {
+    "error_code": "ERR_TENSION_FAULT",
+    "title": "Abnormal Winding Tension",
+    "symptoms": "Measured fiber tension stayed outside the allowed operating band for longer than the configured debounce window.",
+    "fix_steps_md": "1. Check the supply coil on the creel for snags, cross-wraps, or an empty bobbin.\n2. Inspect the dancer arm and brake wheel for fiberglass dust buildup.\n3. Clean the tension rollers with a dry cloth and re-seat the strand in the pulley groove.\n4. Resume winding; if the fault repeats immediately, report a Bug with tag Tension."
+  },
+  {
+    "error_code": "ERR_SUBSYSTEM_TIMEOUT",
+    "title": "Motor or Subsystem Timeout",
+    "symptoms": "The ESP32 controller did not receive an expected encoder pulse, stepper ack, or limit-switch transition in time.",
+    "fix_steps_md": "1. Check that the main drive and traverse belts are intact and the carriage is not blocked.\n2. Inspect motor and sensor connectors on the side control box for loose plugs.\n3. Power-cycle the machine using the main switch and wait 10 seconds before restarting.\n4. If the touchscreen remains stuck or repeats the timeout, report a Bug with tag Unit Dead."
+  },
+  {
+    "error_code": "ERR_BOBBIN_JAM",
+    "title": "Bobbin or Traverse Jam",
+    "symptoms": "Spindle or traverse carriage stalled under load before reaching the target winding turns.",
+    "fix_steps_md": "1. Power off or engage E-Stop before touching the spindle or traverse screw.\n2. Inspect the target coil flanges and traverse guide for tangled fiberglass or misaligned bobbin locks.\n3. Remove the jammed material and verify the bobbin spins freely by hand.\n4. Release E-Stop, re-home the traverse if prompted, and start a fresh cycle."
+  },
+  {
+    "error_code": "ERR_BROWNOUT_RESET",
+    "title": "Controller Brownout Reset",
+    "symptoms": "The ESP32 Pico rebooted due to a supply voltage dip (esp_reset_reason brownout) during operation.",
+    "fix_steps_md": "1. Check the machine power cord, breaker, and 24V/5V DC power supply plug for loose contacts.\n2. Confirm no high-draw heater or grinder was plugged into the same local outlet strip.\n3. Wait 15 seconds for the touchscreen to reconnect to Wi-Fi and verify status returns to IDLE.\n4. If brownouts recur on the same machine, notify maintenance to inspect the DC power supply."
+  },
+  {
+    "error_code": "ERR_WATCHDOG_RESET",
+    "title": "Controller Watchdog Reset",
+    "symptoms": "The ESP32 firmware froze and was automatically rebooted by the hardware task watchdog timer.",
+    "fix_steps_md": "1. Wait 15 seconds for the controller and touchscreen to finish rebooting.\n2. Inspect the partially wound coil to decide whether to continue or discard per quality rules.\n3. Check that the ventilation slot on the controller enclosure is unobstructed.\n4. Report a Bug with tag Unit Dead so engineering can inspect the attached reset logs."
+  }
+]
