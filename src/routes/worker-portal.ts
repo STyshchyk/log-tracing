@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { getMachineById, listMachines, type MachineRecord } from '../services/machines.js';
+import { listRecentErrorSummaries } from '../services/telemetry-events.js';
 import {
   escapeHtml,
   renderErrorCodeBadge,
@@ -8,17 +9,13 @@ import {
   renderStatusBadge,
   renderUnknownMachinePage,
 } from '../ui/portal-layout.js';
+import {
+  formatTimestampUtc,
+  renderRecentErrorsSection,
+} from '../ui/recent-errors-section.js';
 
 interface MachineParams {
   machineId: string;
-}
-
-function formatTimestampUtc(isoTimestamp: string): string {
-  const date = new Date(isoTimestamp);
-  if (Number.isNaN(date.getTime())) {
-    return isoTimestamp;
-  }
-  return `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }
 
 /**
@@ -163,7 +160,9 @@ export function registerWorkerPortal(app: FastifyInstance, db: Pool): void {
         return reply.status(404).send(renderUnknownMachinePage(rawMachineId));
       }
 
-      return reply.send(renderMachineLandingPage(machine));
+      const recentErrors = await listRecentErrorSummaries(db, machine.id, 5);
+      const recentErrorsHtml = renderRecentErrorsSection(recentErrors);
+      return reply.send(renderMachineLandingPage(machine, recentErrorsHtml));
     },
   );
 }
