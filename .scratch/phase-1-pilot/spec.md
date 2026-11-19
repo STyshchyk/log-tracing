@@ -1,6 +1,6 @@
 # Phase 1 — Pilot: Factory Winding Room Telemetry, Worker Portal & Firmware Contract
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
