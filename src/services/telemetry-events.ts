@@ -34,6 +34,17 @@ export interface ListRecentEventsOptions {
   errorsOnly?: boolean | undefined;
 }
 
+/**
+ * Concise error event summary joined with glossary metadata for the Worker Portal feed.
+ */
+export interface RecentErrorSummary {
+  time: string;
+  event_type: EventType | string;
+  error_code: string | null;
+  glossary_title: string | null;
+  summary: string;
+}
+
 interface TelemetryEventRow {
   time: Date;
   machine_id: string;
@@ -42,14 +53,54 @@ interface TelemetryEventRow {
   payload_json: TelemetryEventMetadata;
 }
 
+interface RecentErrorSummaryRow {
+  time: Date;
+  event_type: string;
+  error_code: string | null;
+  glossary_title: string | null;
+  payload_json: TelemetryEventMetadata;
+}
+
 const DEFAULT_EVENTS_LIMIT = 20;
+const DEFAULT_RECENT_ERRORS_LIMIT = 5;
 const MAX_EVENTS_LIMIT = 100;
 
-function normalizeLimit(limit?: number): number {
+function normalizeLimit(limit?: number, defaultLimit = DEFAULT_EVENTS_LIMIT): number {
   if (limit === undefined || !Number.isFinite(limit)) {
-    return DEFAULT_EVENTS_LIMIT;
+    return defaultLimit;
   }
   return Math.min(MAX_EVENTS_LIMIT, Math.max(1, Math.trunc(limit)));
+}
+
+function formatEventTypeLabel(eventType: string): string {
+  const words = eventType.trim().toLowerCase().replaceAll('_', ' ');
+  if (!words) {
+    return 'Error';
+  }
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+function deriveErrorSummary(
+  eventType: string,
+  payload: TelemetryEventMetadata | null | undefined,
+): string {
+  const message = typeof payload?.message === 'string' ? payload.message.trim() : '';
+  if (message.length > 0) {
+    return message;
+  }
+
+  const resetReason =
+    typeof payload?.reset_reason === 'string' ? payload.reset_reason.trim() : '';
+  if (resetReason.length > 0) {
+    return `Reset reason: ${resetReason}`;
+  }
+
+  const subsystem = typeof payload?.subsystem === 'string' ? payload.subsystem.trim() : '';
+  if (subsystem.length > 0) {
+    return `Subsystem: ${subsystem}`;
+  }
+
+  return formatEventTypeLabel(eventType);
 }
 
 /**
@@ -98,5 +149,45 @@ export async function listRecentEvents(
     event_type: row.event_type,
     error_code: row.error_code,
     payload_json: row.payload_json,
+  }));
+}
+
+/**
+ * List up to `limit` newest error/fault summaries for a machine joined with glossary titles.
+ */
+export async function listRecentErrorSummaries(
+  db: Pool,
+  machineId: string,
+  limit = DEFAULT_RECENT_ERRORS_LIMIT,
+): Promise<RecentErrorSummary[]> {
+  const trimmedId = machineId.trim();
+  if (!trimmedId) {
+    return [];
+  }
+
+  const normalizedLimit = normalizeLimit(limit, DEFAULT_RECENT_ERRORS_LIMIT);
+  const result = await db.query<RecentErrorSummaryRow>(
+    `SELECT
+       te.time,
+       te.event_type,
+       te.error_code,
+       eg.title AS glossary_title,
+       te.payload_json
+     FROM telemetry_events te
+     LEFT JOIN error_glossary eg
+       ON eg.error_code = te.error_code
+     WHERE te.machine_id = $1
+       AND (te.error_code IS NOT NULL OR te.event_type = ANY($2::text[]))
+     ORDER BY te.time DESC
+     LIMIT $3`,
+    [trimmedId, [...ERROR_EVENT_TYPES], normalizedLimit],
+  );
+
+  return result.rows.map((row) => ({
+    time: row.time.toISOString(),
+    event_type: row.event_type,
+    error_code: row.error_code,
+    glossary_title: row.glossary_title,
+    summary: deriveErrorSummary(row.event_type, row.payload_json),
   }));
 }

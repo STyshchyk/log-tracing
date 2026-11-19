@@ -7,6 +7,7 @@ import { registerCoilIngestion } from './mqtt/coil-ingestion.js';
 import { registerEventsIngestion } from './mqtt/events-ingestion.js';
 import { registerStatusIngestion } from './mqtt/status-ingestion.js';
 import type { MqttTransport } from './mqtt/transport.js';
+import { registerBugReportsApi } from './routes/bug-reports-api.js';
 import { registerCoilsApi } from './routes/coils-api.js';
 import { registerEventsApi } from './routes/events-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
@@ -86,6 +87,7 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerGlossaryApi(app, deps.db);
   registerMachinesApi(app, deps.db);
   registerEventsApi(app, deps.db);
+  registerBugReportsApi(app, deps.db);
   registerCoilsApi(app, deps.db);
   registerWorkerPortal(app, deps.db);
   registerWorkerGlossary(app, deps.db);
