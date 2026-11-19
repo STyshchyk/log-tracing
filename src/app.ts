@@ -3,8 +3,10 @@ import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { seedGlossary } from './db/seed-glossary.js';
+import { registerEventsIngestion } from './mqtt/events-ingestion.js';
 import { registerStatusIngestion } from './mqtt/status-ingestion.js';
 import type { MqttTransport } from './mqtt/transport.js';
+import { registerEventsApi } from './routes/events-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
 
@@ -73,9 +75,12 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
     },
   );
 
+  await registerEventsIngestion(deps.mqtt, deps.db, app.log);
+  await registerStatusIngestion(deps.mqtt, deps.db, app.log);
+
   registerGlossaryApi(app, deps.db);
   registerMachinesApi(app, deps.db);
-  await registerStatusIngestion(deps.mqtt, deps.db, app.log);
+  registerEventsApi(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();
