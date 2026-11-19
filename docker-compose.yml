@@ -41,6 +41,20 @@ services:
       MQTT_URL: mqtt://mosquitto:1883
       HOST: 0.0.0.0
       PORT: 3000
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      CF_ACCESS_ALLOWED_EMAILS: ${CF_ACCESS_ALLOWED_EMAILS:-}
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["remote"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      TUNNEL_TOKEN: ${CF_TOKEN:-}
 
 volumes:
   pg_data:
