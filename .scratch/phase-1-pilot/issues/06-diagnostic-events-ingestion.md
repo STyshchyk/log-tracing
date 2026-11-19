@@ -4,9 +4,9 @@
 
 **Blocked by:** 02: ESP32 MQTT Protocol Contract & Behavioral Integration Guide, 03: Local Docker Stack, 5-Table Schema & Test Harness Bootstrap
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Publishing valid `events` payloads appends timestamped rows to the TimescaleDB `telemetry_events` hypertable preserving `event_type`, optional `error_code`, and structured diagnostic metadata (RSSI, heap, reset reason).
-- [ ] Recent-events HTTP query endpoint returns events for a registered machine ordered newest-first with configurable limit (supporting both last 3–5 error lookup and last-20 snapshot retrieval) and 404 for unknown machines.
-- [ ] Malformed payloads or unknown machine IDs are safely ignored and logged without interrupting subsequent valid events.
-- [ ] Verified across the unified application seam against real PostgreSQL/TimescaleDB.
+- [x] Publishing valid `events` payloads appends timestamped rows to the TimescaleDB `telemetry_events` hypertable preserving `event_type`, optional `error_code`, and structured diagnostic metadata (RSSI, heap, reset reason).
+- [x] Recent-events HTTP query endpoint returns events for a registered machine ordered newest-first with configurable limit (supporting both last 3–5 error lookup and last-20 snapshot retrieval) and 404 for unknown machines.
+- [x] Malformed payloads or unknown machine IDs are safely ignored and logged without interrupting subsequent valid events.
+- [x] Verified across the unified application seam against real PostgreSQL/TimescaleDB.
