@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createApp } from '../src/app.js';
+import { createInMemoryMqttTransport } from '../src/mqtt/transport.js';
 import { createTestApp, type TestAppContext } from './helpers/test-app.js';
 
 describe('bootstrap seam (Fastify + real PostgreSQL/TimescaleDB)', () => {
@@ -126,5 +128,34 @@ describe('bootstrap seam (Fastify + real PostgreSQL/TimescaleDB)', () => {
     await isolated.close();
 
     await expect(isolated.mqtt.subscribe('factory/winders/#', async () => {})).rejects.toThrow();
+  });
+
+  it('defaults createApp logger to an active Pino logger and logs warnings on rejected MQTT payloads while createTestApp defaults to disabled logging', async () => {
+    expect(ctx.app.log.level).toBeUndefined();
+
+    const mqtt = createInMemoryMqttTransport();
+    const prodApp = await createApp({ db: ctx.db, mqtt });
+    const warnSpy = vi.spyOn(prodApp.log, 'warn').mockImplementation(() => {});
+
+    try {
+      expect(prodApp.log.level).toBe('info');
+      expect(prodApp.log.level).not.toBe('silent');
+
+      await mqtt.emit('factory/winders/TEST-LOGGER/status', '{invalid-json');
+      await mqtt.emit('factory/winders/TEST-LOGGER/events', '{invalid-json');
+      await mqtt.emit('factory/winders/TEST-LOGGER/coil', '{invalid-json');
+
+      expect(warnSpy).toHaveBeenCalledTimes(3);
+    } finally {
+      warnSpy.mockRestore();
+      await prodApp.close();
+    }
+
+    const customTestApp = await createTestApp({ logger: { level: 'warn' } });
+    try {
+      expect(customTestApp.app.log.level).toBe('warn');
+    } finally {
+      await customTestApp.close();
+    }
   });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { loadFaultRegistry, parseFaultRegistry } from '../src/spec/fault-registry.js';
+import {
+  ERROR_CODE_REGEX,
+  errorCodeSchema,
+  loadFaultRegistry,
+  nonEmptyText,
+  parseFaultRegistry,
+} from '../src/spec/fault-registry.js';
 
 describe('fault registry', () => {
   it('parses a valid flat JSON array of fault entries', () => {
@@ -108,5 +114,14 @@ describe('fault registry', () => {
     for (const entry of entries) {
       expect(entry.fix_steps_md).toMatch(/1\.\s+/);
     }
+  });
+
+  it('exports shared ERROR_CODE_REGEX, errorCodeSchema, and nonEmptyText primitives', () => {
+    expect(ERROR_CODE_REGEX.test('ERR_FIBER_SNAP')).toBe(true);
+    expect(ERROR_CODE_REGEX.test('err_bad')).toBe(false);
+    expect(errorCodeSchema.safeParse('ERR_TENSION_FAULT').success).toBe(true);
+    expect(errorCodeSchema.safeParse('ERR__BAD').success).toBe(false);
+    expect(nonEmptyText.safeParse('valid').success).toBe(true);
+    expect(nonEmptyText.safeParse('   ').success).toBe(false);
   });
 });

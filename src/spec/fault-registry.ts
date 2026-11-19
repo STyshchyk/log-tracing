@@ -3,17 +3,30 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
-const nonEmptyText = z
+/**
+ * Pattern matching valid uppercase C++ enum identifiers without consecutive or trailing underscores.
+ */
+export const ERROR_CODE_REGEX = /^[A-Z](?:[A-Z0-9]|_[A-Z0-9])*$/;
+
+/**
+ * Zod schema ensuring a string is neither empty nor whitespace-only.
+ */
+export const nonEmptyText = z
   .string()
   .refine((value) => value.trim().length > 0, 'String must not be empty or whitespace-only');
 
+/**
+ * Zod schema validating canonical firmware `error_code` identifiers.
+ */
+export const errorCodeSchema = z
+  .string()
+  .regex(
+    ERROR_CODE_REGEX,
+    'error_code must be a valid uppercase C++ enum identifier without consecutive or trailing underscores',
+  );
+
 const faultEntrySchema = z.strictObject({
-  error_code: z
-    .string()
-    .regex(
-      /^[A-Z](?:[A-Z0-9]|_[A-Z0-9])*$/,
-      'error_code must be a valid uppercase C++ enum identifier without consecutive or trailing underscores',
-    ),
+  error_code: errorCodeSchema,
   title: nonEmptyText,
   symptoms: nonEmptyText,
   fix_steps_md: nonEmptyText,

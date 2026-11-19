@@ -1,8 +1,20 @@
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Pool } from 'pg';
+import { seedGlossary } from './db/seed-glossary.js';
+import { registerCoilIngestion } from './mqtt/coil-ingestion.js';
+import { registerEventsIngestion } from './mqtt/events-ingestion.js';
+import { registerStatusIngestion } from './mqtt/status-ingestion.js';
 import type { MqttTransport } from './mqtt/transport.js';
+import { registerBugReportsApi } from './routes/bug-reports-api.js';
+import { registerCoilsApi } from './routes/coils-api.js';
+import { registerEventsApi } from './routes/events-api.js';
+import { registerGlossaryApi } from './routes/glossary-api.js';
+import { registerMachinesApi } from './routes/machines-api.js';
+import { registerWorkerBugReport } from './routes/worker-bug-report.js';
+import { registerWorkerGlossary } from './routes/worker-glossary.js';
+import { registerWorkerPortal } from './routes/worker-portal.js';
 
 /**
  * Top-level runtime dependencies injected at the application seam.
@@ -10,13 +22,37 @@ import type { MqttTransport } from './mqtt/transport.js';
 export interface AppDeps {
   db: Pool;
   mqtt: MqttTransport;
+  logger?: boolean | FastifyServerOptions['logger'];
 }
 
 /**
  * Build the Fastify application wired to PostgreSQL/TimescaleDB and MQTT transport.
  */
 export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  await seedGlossary(deps.db);
+
+  const app = Fastify({ logger: deps.logger ?? true });
+
+  app.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      try {
+        const raw = typeof body === 'string' ? body : body.toString('utf8');
+        const params = new URLSearchParams(raw);
+        const parsed: Record<string, string> = {};
+        for (const [key, value] of params.entries()) {
+          if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+            continue;
+          }
+          parsed[key] = value;
+        }
+        done(null, parsed);
+      } catch (err) {
+        done(err instanceof Error ? err : new Error(String(err)), undefined);
+      }
+    },
+  );
 
   await app.register(swagger, {
     openapi: {
@@ -66,6 +102,19 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
       }
     },
   );
+
+  await registerEventsIngestion(deps.mqtt, deps.db, app.log);
+  await registerStatusIngestion(deps.mqtt, deps.db, app.log);
+  await registerCoilIngestion(deps.mqtt, deps.db, app.log);
+
+  registerGlossaryApi(app, deps.db);
+  registerMachinesApi(app, deps.db);
+  registerEventsApi(app, deps.db);
+  registerBugReportsApi(app, deps.db);
+  registerCoilsApi(app, deps.db);
+  registerWorkerPortal(app, deps.db);
+  registerWorkerGlossary(app, deps.db);
+  registerWorkerBugReport(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();
