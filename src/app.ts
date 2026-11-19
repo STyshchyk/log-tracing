@@ -9,6 +9,7 @@ import type { MqttTransport } from './mqtt/transport.js';
 import { registerEventsApi } from './routes/events-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
+import { registerWorkerPortal } from './routes/worker-portal.js';
 
 /**
  * Top-level runtime dependencies injected at the application seam.
@@ -81,6 +82,7 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerGlossaryApi(app, deps.db);
   registerMachinesApi(app, deps.db);
   registerEventsApi(app, deps.db);
+  registerWorkerPortal(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();

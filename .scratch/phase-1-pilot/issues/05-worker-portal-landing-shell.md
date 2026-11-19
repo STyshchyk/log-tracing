@@ -4,10 +4,10 @@
 
 **Blocked by:** 04: Live Machine Status Ingestion (WORKING / IDLE / ERROR / OFFLINE)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Visiting the machine portal route for a registered machine renders cleanly in mobile Chrome over plain local LAN HTTP with zero login and zero APK install.
-- [ ] Landing screen prominently shows the machine display name/ID, current live state (`WORKING`, `IDLE`, `ERROR`, `OFFLINE`), and active `error_code` badge when present.
-- [ ] Home screen presents two large primary action buttons: `Report a Bug` and `Glossary / FAQ`, with no clutter or admin charts.
-- [ ] Scanning or visiting an unregistered or invalid machine ID renders a clear, worker-friendly 404 error screen with a recovery link instead of a blank or raw error page.
-- [ ] Verified via Fastify `app.inject()` against real database state for `WORKING`, `IDLE`, `ERROR`, `OFFLINE`, and unknown machine IDs.
+- [x] Visiting the machine portal route for a registered machine renders cleanly in mobile Chrome over plain local LAN HTTP with zero login and zero APK install.
+- [x] Landing screen prominently shows the machine display name/ID, current live state (`WORKING`, `IDLE`, `ERROR`, `OFFLINE`), and active `error_code` badge when present.
+- [x] Home screen presents two large primary action buttons: `Report a Bug` and `Glossary / FAQ`, with no clutter or admin charts.
+- [x] Scanning or visiting an unregistered or invalid machine ID renders a clear, worker-friendly 404 error screen with a recovery link instead of a blank or raw error page.
+- [x] Verified via Fastify `app.inject()` against real database state for `WORKING`, `IDLE`, `ERROR`, `OFFLINE`, and unknown machine IDs.
