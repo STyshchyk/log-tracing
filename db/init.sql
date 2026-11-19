@@ -33,6 +33,57 @@ CREATE TABLE IF NOT EXISTS coil_outcomes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_coil_outcomes_machine_created_at
+  ON coil_outcomes (machine_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_coil_outcomes_created_at
+  ON coil_outcomes (created_at DESC);
+
+CREATE OR REPLACE VIEW coil_rollup_machine AS
+WITH windows AS (
+  SELECT 'TODAY'::text AS time_window, 1 AS window_order, date_trunc('day', NOW()) AS window_start
+  UNION ALL
+  SELECT 'WEEK'::text AS time_window, 2 AS window_order, date_trunc('week', NOW()) AS window_start
+  UNION ALL
+  SELECT 'MONTH'::text AS time_window, 3 AS window_order, date_trunc('month', NOW()) AS window_start
+  UNION ALL
+  SELECT 'ALL_TIME'::text AS time_window, 4 AS window_order, NULL::timestamptz AS window_start
+)
+SELECT
+  m.id AS machine_id,
+  w.time_window,
+  COUNT(co.id) FILTER (WHERE co.outcome = 'COMPLETED')::integer AS completed_count,
+  COUNT(co.id) FILTER (WHERE co.outcome = 'ABORTED')::integer AS aborted_count,
+  COUNT(co.id)::integer AS total_count
+FROM machines m
+CROSS JOIN windows w
+LEFT JOIN coil_outcomes co
+  ON co.machine_id = m.id
+  AND (w.window_start IS NULL OR co.created_at >= w.window_start)
+GROUP BY m.id, w.time_window, w.window_order
+ORDER BY m.id ASC, w.window_order ASC;
+
+CREATE OR REPLACE VIEW coil_rollup_room AS
+WITH windows AS (
+  SELECT 'TODAY'::text AS time_window, 1 AS window_order, date_trunc('day', NOW()) AS window_start
+  UNION ALL
+  SELECT 'WEEK'::text AS time_window, 2 AS window_order, date_trunc('week', NOW()) AS window_start
+  UNION ALL
+  SELECT 'MONTH'::text AS time_window, 3 AS window_order, date_trunc('month', NOW()) AS window_start
+  UNION ALL
+  SELECT 'ALL_TIME'::text AS time_window, 4 AS window_order, NULL::timestamptz AS window_start
+)
+SELECT
+  w.time_window,
+  COUNT(co.id) FILTER (WHERE co.outcome = 'COMPLETED')::integer AS completed_count,
+  COUNT(co.id) FILTER (WHERE co.outcome = 'ABORTED')::integer AS aborted_count,
+  COUNT(co.id)::integer AS total_count
+FROM windows w
+LEFT JOIN coil_outcomes co
+  ON w.window_start IS NULL OR co.created_at >= w.window_start
+GROUP BY w.time_window, w.window_order
+ORDER BY w.window_order ASC;
+
 CREATE TABLE IF NOT EXISTS error_glossary (
   error_code TEXT PRIMARY KEY,
   title TEXT NOT NULL,
