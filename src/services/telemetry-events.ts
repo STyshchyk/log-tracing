@@ -81,7 +81,10 @@ function formatEventTypeLabel(eventType: string): string {
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
-function deriveErrorSummary(
+/**
+ * Derive a concise operator-facing error summary string from a telemetry event type and payload.
+ */
+export function deriveErrorSummary(
   eventType: string,
   payload: TelemetryEventMetadata | null | undefined,
 ): string {

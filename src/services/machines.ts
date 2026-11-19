@@ -15,7 +15,10 @@ export interface MachineRecord {
   last_seen_at: string | null;
 }
 
-interface MachineRow {
+/**
+ * Database row shape returned by queries on the `machines` table.
+ */
+export interface MachineRow {
   id: string;
   display_name: string;
   zone: FloorZone;
@@ -26,7 +29,24 @@ interface MachineRow {
   last_seen_at: Date | null;
 }
 
-function mapMachineRow(row: MachineRow): MachineRecord {
+/**
+ * Canonical column list for `machines` queries.
+ */
+export const MACHINE_COLUMNS = `
+  id,
+  display_name,
+  zone,
+  grid_row,
+  grid_col,
+  current_state,
+  active_error,
+  last_seen_at
+`;
+
+/**
+ * Map a raw PostgreSQL `machines` row into a JSON-serializable `MachineRecord`.
+ */
+export function mapMachineRow(row: MachineRow): MachineRecord {
   return {
     id: row.id,
     display_name: row.display_name,

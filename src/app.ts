@@ -2,6 +2,11 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Pool } from 'pg';
+import {
+  createFleetAuthPreHandler,
+  loadCloudflareAccessConfigFromEnv,
+  type CloudflareAccessConfig,
+} from './auth/cloudflare-access.js';
 import { seedGlossary } from './db/seed-glossary.js';
 import { registerCoilIngestion } from './mqtt/coil-ingestion.js';
 import { registerEventsIngestion } from './mqtt/events-ingestion.js';
@@ -10,6 +15,8 @@ import type { MqttTransport } from './mqtt/transport.js';
 import { registerBugReportsApi } from './routes/bug-reports-api.js';
 import { registerCoilsApi } from './routes/coils-api.js';
 import { registerEventsApi } from './routes/events-api.js';
+import { registerFleetApi } from './routes/fleet-api.js';
+import { registerFleetPortal } from './routes/fleet-portal.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
 import { registerWorkerBugReport } from './routes/worker-bug-report.js';
@@ -23,6 +30,7 @@ export interface AppDeps {
   db: Pool;
   mqtt: MqttTransport;
   logger?: boolean | FastifyServerOptions['logger'];
+  fleetAuth?: CloudflareAccessConfig;
 }
 
 /**
@@ -115,6 +123,13 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerWorkerPortal(app, deps.db);
   registerWorkerGlossary(app, deps.db);
   registerWorkerBugReport(app, deps.db);
+
+  const fleetAuthConfig = deps.fleetAuth ?? loadCloudflareAccessConfigFromEnv();
+  await app.register(async (fleetScope) => {
+    fleetScope.addHook('preHandler', createFleetAuthPreHandler(fleetAuthConfig));
+    registerFleetApi(fleetScope, deps.db);
+    registerFleetPortal(fleetScope, deps.db);
+  });
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();

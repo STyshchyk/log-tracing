@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyServerOptions } from 'fastify';
 import type { Pool } from 'pg';
 import { createApp } from '../../src/app.js';
+import type { CloudflareAccessConfig } from '../../src/auth/cloudflare-access.js';
 import { createDbPool, ensureSchema } from '../../src/db/pool.js';
 import { createInMemoryMqttTransport, type InMemoryMqttTransport } from '../../src/mqtt/transport.js';
 
@@ -9,6 +10,7 @@ import { createInMemoryMqttTransport, type InMemoryMqttTransport } from '../../s
  */
 export interface CreateTestAppOptions {
   logger?: boolean | FastifyServerOptions['logger'];
+  fleetAuth?: CloudflareAccessConfig;
 }
 
 /**
@@ -34,7 +36,12 @@ export async function createTestApp(options?: CreateTestAppOptions): Promise<Tes
     await ensureSchema(db);
 
     const mqtt = createInMemoryMqttTransport();
-    const app = await createApp({ db, mqtt, logger: options?.logger ?? false });
+    const app = await createApp({
+      db,
+      mqtt,
+      logger: options?.logger ?? false,
+      fleetAuth: options?.fleetAuth ?? {},
+    });
 
     return {
       app,
