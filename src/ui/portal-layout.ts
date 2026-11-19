@@ -39,17 +39,11 @@ const STATUS_BADGE_META: Record<MachineState, StatusBadgeMeta> = {
   OFFLINE: { symbol: '&#10005;', label: 'OFFLINE', cssClass: 'status-offline' },
 };
 
-const FALLBACK_STATUS_META: StatusBadgeMeta = {
-  symbol: '&#10005;',
-  label: 'OFFLINE',
-  cssClass: 'status-offline',
-};
-
 /**
  * Render an accessible machine operational state badge with non-color symbol, label, and CSS class.
  */
 export function renderStatusBadge(state: MachineState): string {
-  const meta = STATUS_BADGE_META[state] ?? FALLBACK_STATUS_META;
+  const meta = STATUS_BADGE_META[state];
   return `<span class="status-badge ${meta.cssClass}" data-state="${escapeHtml(state)}"><span class="badge-icon" aria-hidden="true">${meta.symbol}</span><span>${escapeHtml(meta.label)}</span></span>`;
 }
 
@@ -417,6 +411,39 @@ const PORTAL_STYLES = `
     padding-block-start: 0.25rem;
   }
 
+  .recent-error-item {
+    padding: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background-color: var(--surface-subtle);
+    min-block-size: 3.5rem;
+  }
+
+  .recent-error-code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+  }
+
+  .recent-error-title {
+    margin: 0.45rem 0 0;
+    font-weight: 700;
+  }
+
+  .recent-error-summary {
+    margin: 0.45rem 0 0;
+    font-weight: 600;
+  }
+
+  .recent-error-title + .recent-error-summary {
+    margin: 0.2rem 0 0;
+    font-weight: 400;
+  }
+
+  .empty-state-note {
+    margin-block-end: 0;
+  }
+
   @media (forced-colors: active) {
     .card,
     .back-link,
@@ -424,7 +451,8 @@ const PORTAL_STYLES = `
     .machine-card-link,
     .recovery-link,
     .status-badge,
-    .error-code-badge {
+    .error-code-badge,
+    .recent-error-item {
       border-color: CanvasText;
     }
 

@@ -1,8 +1,15 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyServerOptions } from 'fastify';
 import type { Pool } from 'pg';
 import { createApp } from '../../src/app.js';
 import { createDbPool, ensureSchema } from '../../src/db/pool.js';
 import { createInMemoryMqttTransport, type InMemoryMqttTransport } from '../../src/mqtt/transport.js';
+
+/**
+ * Optional configuration for creating a test Fastify harness.
+ */
+export interface CreateTestAppOptions {
+  logger?: boolean | FastifyServerOptions['logger'];
+}
 
 /**
  * Live test context backed by real PostgreSQL/TimescaleDB and an in-memory MQTT transport.
@@ -19,7 +26,7 @@ const DEFAULT_TEST_DB_URL = 'postgresql://telemetry:telemetry@localhost:5432/tel
 /**
  * Create an isolated test harness instance connected to real PostgreSQL/TimescaleDB.
  */
-export async function createTestApp(): Promise<TestAppContext> {
+export async function createTestApp(options?: CreateTestAppOptions): Promise<TestAppContext> {
   const connectionString =
     process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? DEFAULT_TEST_DB_URL;
   const db = createDbPool(connectionString);
@@ -27,7 +34,7 @@ export async function createTestApp(): Promise<TestAppContext> {
     await ensureSchema(db);
 
     const mqtt = createInMemoryMqttTransport();
-    const app = await createApp({ db, mqtt });
+    const app = await createApp({ db, mqtt, logger: options?.logger ?? false });
 
     return {
       app,

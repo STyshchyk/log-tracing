@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { getMachineById } from '../services/machines.js';
 import { FLOOR_ZONES, MACHINE_STATES } from '../spec/mqtt-contract.js';
+import { machineNotFoundResponseSchema, sendMachineNotFound } from './api-schemas.js';
 
 interface MachineParams {
   machineId: string;
@@ -51,14 +52,7 @@ export function registerMachinesApi(app: FastifyInstance, db: Pool): void {
               last_seen_at: { type: 'string', format: 'date-time', nullable: true },
             },
           },
-          404: {
-            type: 'object',
-            required: ['error', 'machineId'],
-            properties: {
-              error: { type: 'string' },
-              machineId: { type: 'string' },
-            },
-          },
+          404: machineNotFoundResponseSchema,
         },
       },
     },
@@ -67,10 +61,7 @@ export function registerMachinesApi(app: FastifyInstance, db: Pool): void {
       const machine = await getMachineById(db, machineId);
 
       if (machine === null) {
-        return reply.status(404).send({
-          error: 'Machine not found',
-          machineId,
-        });
+        return sendMachineNotFound(reply, machineId);
       }
 
       return reply.send(machine);

@@ -1,22 +1,16 @@
 import type { Pool } from 'pg';
+import { statusPayloadSchema, type StatusPayload } from '../spec/mqtt-contract.js';
 import {
-  MQTT_TOPIC_PREFIX,
-  parseMqttJsonPayload,
-  parseWinderTopic,
-  statusPayloadSchema,
-  type StatusPayload,
-} from '../spec/mqtt-contract.js';
+  defaultMqttLogger,
+  subscribeWinderChannel,
+  type MqttIngestionLogger,
+} from './ingestion-helpers.js';
 import type { MqttTransport } from './transport.js';
 
 /**
  * Minimal logger interface compatible with Fastify's Pino logger (`app.log`).
  */
-export interface StatusIngestionLogger {
-  warn(obj: Record<string, unknown>, msg: string): void;
-  error(obj: Record<string, unknown>, msg: string): void;
-}
-
-const STATUS_TOPIC_FILTER = `${MQTT_TOPIC_PREFIX}/+/status`;
+export type StatusIngestionLogger = MqttIngestionLogger;
 
 function resolveActiveErrorUpdate(payload: StatusPayload): {
   shouldUpdate: boolean;
@@ -40,34 +34,15 @@ function resolveActiveErrorUpdate(payload: StatusPayload): {
 export async function registerStatusIngestion(
   mqtt: MqttTransport,
   db: Pool,
-  logger?: StatusIngestionLogger,
+  logger: StatusIngestionLogger = defaultMqttLogger,
 ): Promise<void> {
-  await mqtt.subscribe(STATUS_TOPIC_FILTER, async (topic, rawPayload) => {
-    const parsedTopic = parseWinderTopic(topic);
-    if (!parsedTopic || parsedTopic.channel !== 'status') {
-      logger?.warn({ topic }, 'Ignoring status message with invalid winder topic');
-      return;
-    }
-
-    let payload;
-    try {
-      payload = parseMqttJsonPayload(rawPayload, statusPayloadSchema);
-    } catch (err) {
-      logger?.warn(
-        {
-          topic,
-          machineId: parsedTopic.machineId,
-          byteLength: rawPayload.byteLength,
-          reason: err instanceof Error ? err.message : String(err),
-        },
-        'Ignoring invalid MQTT status payload',
-      );
-      return;
-    }
-
-    const activeErrorUpdate = resolveActiveErrorUpdate(payload);
-
-    try {
+  await subscribeWinderChannel(
+    mqtt,
+    'status',
+    statusPayloadSchema,
+    logger,
+    async ({ topic, machineId, payload }) => {
+      const activeErrorUpdate = resolveActiveErrorUpdate(payload);
       const result = await db.query(
         `UPDATE machines
          SET current_state = $2,
@@ -75,7 +50,7 @@ export async function registerStatusIngestion(
              last_seen_at = NOW()
          WHERE id = $1`,
         [
-          parsedTopic.machineId,
+          machineId,
           payload.state,
           activeErrorUpdate.shouldUpdate,
           activeErrorUpdate.value,
@@ -83,20 +58,11 @@ export async function registerStatusIngestion(
       );
 
       if (result.rowCount === 0) {
-        logger?.warn(
-          { topic, machineId: parsedTopic.machineId, state: payload.state },
+        logger.warn(
+          { topic, machineId, state: payload.state },
           'Ignoring MQTT status message for unregistered machine',
         );
       }
-    } catch (err) {
-      logger?.error(
-        {
-          topic,
-          machineId: parsedTopic.machineId,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        'Failed to persist MQTT machine status update',
-      );
-    }
-  });
+    },
+  );
 }

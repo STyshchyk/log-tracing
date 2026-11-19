@@ -126,13 +126,19 @@ describe('diagnostic events ingestion and query API', () => {
       }),
     );
 
-    // Invalid ts strings -> ignored completely (do not crash or persist)
-    for (const badTs of ['not-a-timestamp', '2026-13-45T00:00:00Z', 'abc 1']) {
+    // Invalid ts values -> ignored completely (do not crash or persist)
+    for (const badTs of [
+      'not-a-timestamp',
+      '2026-13-45T00:00:00Z',
+      '2026-02-30T12:00:00Z',
+      'abc 1',
+      1e20,
+    ]) {
       await ctx.mqtt.emit(
         `factory/winders/${machineId}/events`,
         JSON.stringify({
           event_type: 'INFO',
-          message: `Invalid ts ${badTs}`,
+          message: `Invalid ts ${String(badTs)}`,
           ts: badTs,
         }),
       );

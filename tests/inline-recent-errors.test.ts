@@ -56,7 +56,14 @@ describe('inline recent errors feed on worker portal', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('id="recent-errors"');
     expect(res.body).toContain('Recent Errors</h2>');
+    expect(res.body).toContain('class="machine-meta empty-state-note"');
     expect(res.body).toContain('No recent errors recorded for this machine.');
+    expect(res.body).toContain('.empty-state-note');
+    expect(res.body).toContain('.recent-error-item');
+    expect(res.body).toContain('.recent-error-title');
+    expect(res.body).toContain('.recent-error-summary');
+    expect(res.body).toContain('.recent-error-code');
+    expect(renderRecentErrorsSection([])).not.toContain('style=');
     expect(res.body.match(/<main\b/g)).toHaveLength(1);
     expect(res.body.match(/<h1\b/g)).toHaveLength(1);
   });
@@ -402,5 +409,11 @@ describe('inline recent errors feed on worker portal', () => {
     const cappedHtml = renderRecentErrorsSection(sixItems);
     expect(cappedHtml).toContain('item-5');
     expect(cappedHtml).not.toContain('item-6');
+    expect(cappedHtml).not.toContain('style=');
+    expect(cappedHtml).toContain('class="recent-error-item"');
+    expect(cappedHtml).toContain('class="recent-error-code"');
+    expect(cappedHtml).toContain('class="recent-error-summary"');
+    expect(html).toContain('class="recent-error-title"');
+    expect(html).not.toMatch(/<section[^>]*id="recent-errors"[\s\S]*style=/);
   });
 });

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { queryGlossary } from '../services/glossary.js';
+import { machineNotFoundResponseSchema, sendMachineNotFound } from './api-schemas.js';
 
 interface GlossaryQuerystring {
   q?: string;
@@ -62,14 +63,7 @@ export function registerGlossaryApi(app: FastifyInstance, db: Pool): void {
               },
             },
           },
-          404: {
-            type: 'object',
-            required: ['error', 'machineId'],
-            properties: {
-              error: { type: 'string' },
-              machineId: { type: 'string' },
-            },
-          },
+          404: machineNotFoundResponseSchema,
         },
       },
     },
@@ -80,10 +74,7 @@ export function registerGlossaryApi(app: FastifyInstance, db: Pool): void {
       });
 
       if (result === null) {
-        return reply.status(404).send({
-          error: 'Machine not found',
-          machineId: request.query.machineId?.trim() ?? '',
-        });
+        return sendMachineNotFound(reply, request.query.machineId);
       }
 
       return reply.send(result);

@@ -1,6 +1,6 @@
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Pool } from 'pg';
 import { seedGlossary } from './db/seed-glossary.js';
 import { registerCoilIngestion } from './mqtt/coil-ingestion.js';
@@ -22,6 +22,7 @@ import { registerWorkerPortal } from './routes/worker-portal.js';
 export interface AppDeps {
   db: Pool;
   mqtt: MqttTransport;
+  logger?: boolean | FastifyServerOptions['logger'];
 }
 
 /**
@@ -30,7 +31,7 @@ export interface AppDeps {
 export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   await seedGlossary(deps.db);
 
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: deps.logger ?? true });
 
   app.addContentTypeParser(
     'application/x-www-form-urlencoded',

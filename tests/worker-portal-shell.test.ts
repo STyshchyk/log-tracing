@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { listMachines } from '../src/services/machines.js';
+import { listMachines, normalizeMachineId } from '../src/services/machines.js';
 import {
   renderMachineDirectoryPage,
   renderMachineLandingPage,
@@ -325,5 +325,12 @@ describe('worker portal landing shell and unknown-machine handling', () => {
       '<section id="recent-errors"><h2>Recent Errors</h2></section>',
     );
     expect(withErrorsSlot).toContain('<section id="recent-errors"><h2>Recent Errors</h2></section>');
+  });
+
+  it('normalizeMachineId trims non-empty IDs and returns null for empty or whitespace-only inputs', () => {
+    expect(normalizeMachineId('W-01')).toBe('W-01');
+    expect(normalizeMachineId('  W-01  ')).toBe('W-01');
+    expect(normalizeMachineId('')).toBeNull();
+    expect(normalizeMachineId('   ')).toBeNull();
   });
 });

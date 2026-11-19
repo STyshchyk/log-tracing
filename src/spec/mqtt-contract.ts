@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { errorCodeSchema, nonEmptyText } from './fault-registry.js';
 
 /**
  * Canonical MQTT topic prefix shared by firmware and backend ingestion.
@@ -101,19 +102,7 @@ export const FLOOR_ZONES = ['NORTH_LEFT', 'NORTH_RIGHT', 'MAIN_BANK', 'EAST_DOOR
 export type FloorZone = (typeof FLOOR_ZONES)[number];
 
 const MACHINE_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-const ERROR_CODE_REGEX = /^[A-Z](?:[A-Z0-9]|_[A-Z0-9])*$/;
 const TOPIC_PREFIX_PARTS = MQTT_TOPIC_PREFIX.split('/');
-
-const nonEmptyText = z
-  .string()
-  .refine((value) => value.trim().length > 0, 'String must not be empty or whitespace-only');
-
-const errorCodeSchema = z
-  .string()
-  .regex(
-    ERROR_CODE_REGEX,
-    'error_code must be a valid uppercase C++ enum identifier without consecutive or trailing underscores',
-  );
 
 const timestampSchema = z.union([nonEmptyText, z.number().finite().nonnegative()]);
 
