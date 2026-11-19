@@ -4,9 +4,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { seedGlossary } from './db/seed-glossary.js';
 import { registerCoilIngestion } from './mqtt/coil-ingestion.js';
+import { registerStatusIngestion } from './mqtt/status-ingestion.js';
 import type { MqttTransport } from './mqtt/transport.js';
 import { registerCoilsApi } from './routes/coils-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
+import { registerMachinesApi } from './routes/machines-api.js';
 
 /**
  * Top-level runtime dependencies injected at the application seam.
@@ -73,9 +75,11 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
     },
   );
 
+  await registerStatusIngestion(deps.mqtt, deps.db, app.log);
   await registerCoilIngestion(deps.mqtt, deps.db, app.log);
 
   registerGlossaryApi(app, deps.db);
+  registerMachinesApi(app, deps.db);
   registerCoilsApi(app, deps.db);
 
   app.addHook('onClose', async () => {
