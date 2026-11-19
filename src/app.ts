@@ -6,6 +6,7 @@ import { seedGlossary } from './db/seed-glossary.js';
 import { registerEventsIngestion } from './mqtt/events-ingestion.js';
 import { registerStatusIngestion } from './mqtt/status-ingestion.js';
 import type { MqttTransport } from './mqtt/transport.js';
+import { registerBugReportsApi } from './routes/bug-reports-api.js';
 import { registerEventsApi } from './routes/events-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
@@ -81,6 +82,7 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerGlossaryApi(app, deps.db);
   registerMachinesApi(app, deps.db);
   registerEventsApi(app, deps.db);
+  registerBugReportsApi(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();
