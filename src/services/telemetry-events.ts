@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { ERROR_EVENT_TYPES, type EventType } from '../spec/mqtt-contract.js';
+import { normalizeMachineId } from './machines.js';
 
 /**
  * Structured diagnostic metadata persisted alongside a telemetry event.
@@ -111,7 +112,7 @@ export async function listRecentEvents(
   db: Pool,
   options: ListRecentEventsOptions,
 ): Promise<TelemetryEventRecord[] | null> {
-  const machineId = options.machineId.trim();
+  const machineId = normalizeMachineId(options.machineId);
   if (!machineId) {
     return null;
   }
@@ -160,7 +161,7 @@ export async function listRecentErrorSummaries(
   machineId: string,
   limit = DEFAULT_RECENT_ERRORS_LIMIT,
 ): Promise<RecentErrorSummary[]> {
-  const trimmedId = machineId.trim();
+  const trimmedId = normalizeMachineId(machineId);
   if (!trimmedId) {
     return [];
   }

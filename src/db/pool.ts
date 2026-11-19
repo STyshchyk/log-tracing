@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 
+const SCHEMA_INIT_LOCK_ID = 7391824;
+
 /**
  * Create a PostgreSQL connection pool for the given connection string.
  */
@@ -27,11 +29,11 @@ export async function ensureSchema(pool: Pool): Promise<void> {
   const client = await pool.connect();
 
   try {
-    await client.query('SELECT pg_advisory_lock(7391824)');
+    await client.query(`SELECT pg_advisory_lock(${SCHEMA_INIT_LOCK_ID})`);
     try {
       await client.query(sql);
     } finally {
-      await client.query('SELECT pg_advisory_unlock(7391824)');
+      await client.query(`SELECT pg_advisory_unlock(${SCHEMA_INIT_LOCK_ID})`);
     }
   } finally {
     client.release();

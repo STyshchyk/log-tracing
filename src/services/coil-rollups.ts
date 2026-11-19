@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { normalizeMachineId } from './machines.js';
 
 /**
  * Canonical rollup aggregation windows matching `coil_rollup_machine` and `coil_rollup_room`.
@@ -67,7 +68,7 @@ export async function getMachineCoilRollups(
   db: Pool,
   machineId: string,
 ): Promise<MachineCoilRollupsResult | null> {
-  const trimmedId = machineId.trim();
+  const trimmedId = normalizeMachineId(machineId);
   if (!trimmedId) {
     return null;
   }

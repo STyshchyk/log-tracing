@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { BUG_REPORT_TAGS, type BugReportTag } from '../spec/mqtt-contract.js';
+import { normalizeMachineId } from './machines.js';
 import type { TelemetryEventMetadata, TelemetryEventRecord } from './telemetry-events.js';
 
 export { BUG_REPORT_TAGS, type BugReportTag };
@@ -139,7 +140,7 @@ export async function createBugReport(
 ): Promise<BugReportRecord | null> {
   const validTag = validateTag(input.tag);
   const normalizedNote = normalizeWorkerNote(input.workerNote);
-  const machineId = input.machineId.trim();
+  const machineId = normalizeMachineId(input.machineId);
 
   if (!machineId) {
     return null;
@@ -213,7 +214,7 @@ export async function listBugReports(
   db: Pool,
   machineId: string,
 ): Promise<BugReportRecord[] | null> {
-  const trimmedId = machineId.trim();
+  const trimmedId = normalizeMachineId(machineId);
   if (!trimmedId) {
     return null;
   }

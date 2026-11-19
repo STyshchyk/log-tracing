@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { listRecentEvents } from '../services/telemetry-events.js';
+import {
+  machineNotFoundResponseSchema,
+  sendMachineNotFound,
+  telemetryEventResponseSchema,
+} from './api-schemas.js';
 
 interface MachineEventsParams {
   machineId: string;
@@ -56,40 +61,11 @@ export function registerEventsApi(app: FastifyInstance, db: Pool): void {
               machine_id: { type: 'string' },
               events: {
                 type: 'array',
-                items: {
-                  type: 'object',
-                  required: ['time', 'machine_id', 'event_type', 'error_code', 'payload_json'],
-                  properties: {
-                    time: { type: 'string', format: 'date-time' },
-                    machine_id: { type: 'string' },
-                    event_type: { type: 'string' },
-                    error_code: { type: 'string', nullable: true },
-                    payload_json: {
-                      type: 'object',
-                      additionalProperties: true,
-                      properties: {
-                        reset_reason: { type: 'string' },
-                        rssi: { type: 'number' },
-                        free_heap: { type: 'integer' },
-                        subsystem: { type: 'string' },
-                        message: { type: 'string' },
-                        details: { type: 'object', additionalProperties: true },
-                        ts: { oneOf: [{ type: 'string' }, { type: 'number' }] },
-                      },
-                    },
-                  },
-                },
+                items: telemetryEventResponseSchema,
               },
             },
           },
-          404: {
-            type: 'object',
-            required: ['error', 'machineId'],
-            properties: {
-              error: { type: 'string' },
-              machineId: { type: 'string' },
-            },
-          },
+          404: machineNotFoundResponseSchema,
         },
       },
     },
@@ -102,10 +78,7 @@ export function registerEventsApi(app: FastifyInstance, db: Pool): void {
       });
 
       if (events === null) {
-        return reply.status(404).send({
-          error: 'Machine not found',
-          machineId,
-        });
+        return sendMachineNotFound(reply, machineId);
       }
 
       return reply.send({

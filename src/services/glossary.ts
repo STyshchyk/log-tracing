@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { normalizeMachineId } from './machines.js';
 
 /**
  * Single glossary entry returned by glossary search and lookup queries.
@@ -49,7 +50,7 @@ export async function queryGlossary(
   db: Pool,
   options: QueryGlossaryOptions = {},
 ): Promise<GlossaryQueryResult | null> {
-  const machineId = options.machineId?.trim();
+  const machineId = normalizeMachineId(options.machineId);
   let activeError: string | null = null;
 
   if (machineId) {

@@ -5,6 +5,7 @@ import {
   getMachineCoilRollups,
   getRoomCoilRollups,
 } from '../services/coil-rollups.js';
+import { machineNotFoundResponseSchema, sendMachineNotFound } from './api-schemas.js';
 
 interface MachineParams {
   machineId: string;
@@ -53,24 +54,14 @@ export function registerCoilsApi(app: FastifyInstance, db: Pool): void {
               },
             },
           },
-          404: {
-            type: 'object',
-            required: ['error', 'machineId'],
-            properties: {
-              error: { type: 'string' },
-              machineId: { type: 'string' },
-            },
-          },
+          404: machineNotFoundResponseSchema,
         },
       },
     },
     async (request, reply) => {
       const result = await getMachineCoilRollups(db, request.params.machineId);
       if (result === null) {
-        return reply.status(404).send({
-          error: 'Machine not found',
-          machineId: request.params.machineId.trim(),
-        });
+        return sendMachineNotFound(reply, request.params.machineId);
       }
 
       return reply.send(result);

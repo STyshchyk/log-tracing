@@ -61,10 +61,21 @@ export async function listMachines(db: Pool): Promise<MachineRecord[]> {
 }
 
 /**
+ * Trim a machine ID and return `null` when it is missing or whitespace-only.
+ */
+export function normalizeMachineId(machineId: string | null | undefined): string | null {
+  if (typeof machineId !== 'string') {
+    return null;
+  }
+  const trimmed = machineId.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
  * Fetch a single registered machine by ID, or return null if no matching row exists.
  */
 export async function getMachineById(db: Pool, machineId: string): Promise<MachineRecord | null> {
-  const trimmedId = machineId.trim();
+  const trimmedId = normalizeMachineId(machineId);
   if (!trimmedId) {
     return null;
   }

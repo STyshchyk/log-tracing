@@ -8,6 +8,11 @@ import {
   createBugReportBodySchema,
   listBugReports,
 } from '../services/bug-reports.js';
+import {
+  machineNotFoundResponseSchema,
+  sendMachineNotFound,
+  telemetryEventResponseSchema,
+} from './api-schemas.js';
 
 interface MachineBugReportsParams {
   machineId: string;
@@ -52,30 +57,6 @@ const strictBugReportValidatorCompiler: FastifySchemaCompiler<unknown> = ({ http
   };
 };
 
-const telemetrySnapshotItemSchema = {
-  type: 'object',
-  required: ['time', 'machine_id', 'event_type', 'error_code', 'payload_json'],
-  properties: {
-    time: { type: 'string', format: 'date-time' },
-    machine_id: { type: 'string' },
-    event_type: { type: 'string' },
-    error_code: { type: 'string', nullable: true },
-    payload_json: {
-      type: 'object',
-      additionalProperties: true,
-      properties: {
-        reset_reason: { type: 'string' },
-        rssi: { type: 'number' },
-        free_heap: { type: 'integer' },
-        subsystem: { type: 'string' },
-        message: { type: 'string' },
-        details: { type: 'object', additionalProperties: true },
-        ts: { oneOf: [{ type: 'string' }, { type: 'number' }] },
-      },
-    },
-  },
-} as const;
-
 const bugReportRecordSchema = {
   type: 'object',
   required: [
@@ -98,19 +79,10 @@ const bugReportRecordSchema = {
     photo_path: { type: 'string', nullable: true },
     attached_logs_json: {
       type: 'array',
-      items: telemetrySnapshotItemSchema,
+      items: telemetryEventResponseSchema,
     },
     status: { type: 'string' },
     created_at: { type: 'string', format: 'date-time' },
-  },
-} as const;
-
-const machineNotFoundSchema = {
-  type: 'object',
-  required: ['error', 'machineId'],
-  properties: {
-    error: { type: 'string' },
-    machineId: { type: 'string' },
   },
 } as const;
 
@@ -167,7 +139,7 @@ export function registerBugReportsApi(app: FastifyInstance, db: Pool): void {
         response: {
           201: bugReportRecordSchema,
           400: validationErrorSchema,
-          404: machineNotFoundSchema,
+          404: machineNotFoundResponseSchema,
         },
       },
     },
@@ -182,10 +154,7 @@ export function registerBugReportsApi(app: FastifyInstance, db: Pool): void {
         });
 
         if (created === null) {
-          return reply.status(404).send({
-            error: 'Machine not found',
-            machineId,
-          });
+          return sendMachineNotFound(reply, machineId);
         }
 
         return reply.status(201).send(created);
@@ -230,7 +199,7 @@ export function registerBugReportsApi(app: FastifyInstance, db: Pool): void {
               },
             },
           },
-          404: machineNotFoundSchema,
+          404: machineNotFoundResponseSchema,
         },
       },
     },
@@ -239,10 +208,7 @@ export function registerBugReportsApi(app: FastifyInstance, db: Pool): void {
       const bugReports = await listBugReports(db, machineId);
 
       if (bugReports === null) {
-        return reply.status(404).send({
-          error: 'Machine not found',
-          machineId,
-        });
+        return sendMachineNotFound(reply, machineId);
       }
 
       return reply.send({
