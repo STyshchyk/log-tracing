@@ -12,6 +12,7 @@ import { registerCoilsApi } from './routes/coils-api.js';
 import { registerEventsApi } from './routes/events-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
+import { registerWorkerBugReport } from './routes/worker-bug-report.js';
 import { registerWorkerPortal } from './routes/worker-portal.js';
 
 /**
@@ -29,6 +30,27 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   await seedGlossary(deps.db);
 
   const app = Fastify({ logger: false });
+
+  app.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      try {
+        const raw = typeof body === 'string' ? body : body.toString('utf8');
+        const params = new URLSearchParams(raw);
+        const parsed: Record<string, string> = {};
+        for (const [key, value] of params.entries()) {
+          if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+            continue;
+          }
+          parsed[key] = value;
+        }
+        done(null, parsed);
+      } catch (err) {
+        done(err instanceof Error ? err : new Error(String(err)), undefined);
+      }
+    },
+  );
 
   await app.register(swagger, {
     openapi: {
@@ -89,6 +111,7 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerBugReportsApi(app, deps.db);
   registerCoilsApi(app, deps.db);
   registerWorkerPortal(app, deps.db);
+  registerWorkerBugReport(app, deps.db);
 
   app.addHook('onClose', async () => {
     await deps.mqtt.close();

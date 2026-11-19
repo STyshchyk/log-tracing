@@ -8,6 +8,7 @@ export interface PortalLayoutOptions {
   bodyHtml: string;
   backHref?: string;
   backLabel?: string;
+  extraStyles?: string;
 }
 
 const HTML_ESCAPE_MAP: Record<string, string> = {
@@ -442,13 +443,17 @@ export function renderPortalLayout(options: PortalLayoutOptions): string {
     ? `<header class="portal-header"><nav aria-label="Portal navigation"><a class="back-link" href="${escapeHtml(options.backHref)}"><span aria-hidden="true">&#8592;</span><span>${escapeHtml(options.backLabel ?? 'All Machines')}</span></a></nav></header>`
     : '';
 
+  const combinedStyles = options.extraStyles
+    ? `${PORTAL_STYLES}\n${options.extraStyles}`
+    : PORTAL_STYLES;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>${escapeHtml(options.title)}</title>
-  <style>${PORTAL_STYLES}</style>
+  <style>${combinedStyles}</style>
 </head>
 <body>
   <div class="portal-shell">
