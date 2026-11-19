@@ -1,0 +1,130 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createTestApp, type TestAppContext } from './helpers/test-app.js';
+
+describe('bootstrap seam (Fastify + real PostgreSQL/TimescaleDB)', () => {
+  let ctx: TestAppContext;
+
+  beforeAll(async () => {
+    ctx = await createTestApp();
+  });
+
+  afterAll(async () => {
+    await ctx?.close();
+  });
+
+  it('GET /health returns 200 with connected database status', async () => {
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/health',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      status: 'ok',
+      database: 'connected',
+    });
+  });
+
+  it('provisions all five tables, TimescaleDB hypertable, nullable photo_path, and domain CHECK constraints', async () => {
+    const tablesResult = await ctx.db.query<{ table_name: string }>(
+      `SELECT table_name
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+       ORDER BY table_name`,
+    );
+    const tableNames = tablesResult.rows.map((r) => r.table_name);
+    expect(tableNames).toEqual(
+      expect.arrayContaining([
+        'bug_reports',
+        'coil_outcomes',
+        'error_glossary',
+        'machines',
+        'telemetry_events',
+      ]),
+    );
+
+    const hypertableResult = await ctx.db.query<{ hypertable_name: string }>(
+      `SELECT hypertable_name
+       FROM timescaledb_information.hypertables
+       WHERE hypertable_name = 'telemetry_events'`,
+    );
+    expect(hypertableResult.rows).toHaveLength(1);
+
+    const photoColResult = await ctx.db.query<{ is_nullable: string }>(
+      `SELECT is_nullable
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'bug_reports'
+         AND column_name = 'photo_path'`,
+    );
+    expect(photoColResult.rows[0]?.is_nullable).toBe('YES');
+
+    await ctx.db.query(
+      `INSERT INTO machines (id, display_name, zone, grid_row, grid_col, current_state)
+       VALUES ('TEST-W-99', 'Test Winder', 'NORTH_LEFT', 1, 1, 'IDLE')
+       ON CONFLICT (id) DO NOTHING`,
+    );
+
+    try {
+      await expect(
+        ctx.db.query(
+          `INSERT INTO machines (id, display_name, zone, grid_row, grid_col)
+           VALUES ('TEST-BAD-ZONE', 'Bad', 'INVALID_ZONE', 1, 1)`,
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        ctx.db.query(
+          `INSERT INTO machines (id, display_name, zone, grid_row, grid_col, current_state)
+           VALUES ('TEST-BAD-STATE', 'Bad', 'MAIN_BANK', 1, 1, 'UNKNOWN')`,
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        ctx.db.query(
+          `INSERT INTO coil_outcomes (machine_id, outcome)
+           VALUES ('TEST-W-99', 'REDO')`,
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        ctx.db.query(
+          `INSERT INTO bug_reports (machine_id, tag)
+           VALUES ('TEST-W-99', 'Invalid Tag')`,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await ctx.db.query(`DELETE FROM machines WHERE id = 'TEST-W-99'`);
+    }
+  });
+
+  it('GET /docs/json exposes valid OpenAPI 3 spec and GET /docs/ serves Swagger UI', async () => {
+    const specResponse = await ctx.app.inject({
+      method: 'GET',
+      url: '/docs/json',
+    });
+
+    expect(specResponse.statusCode).toBe(200);
+    const spec = specResponse.json<{
+      openapi: string;
+      paths: Record<string, { get?: { responses?: Record<string, unknown> } }>;
+    }>();
+    expect(spec.openapi).toMatch(/^3\.0\./);
+    expect(spec.paths['/health']?.get?.responses?.['200']).toBeDefined();
+    expect(spec.paths['/health']?.get?.responses?.['503']).toBeDefined();
+
+    const uiResponse = await ctx.app.inject({
+      method: 'GET',
+      url: '/docs/',
+    });
+    expect(uiResponse.statusCode).toBe(200);
+    expect(uiResponse.headers['content-type']).toMatch(/text\/html/);
+  });
+
+  it('closes the injected MQTT transport when Fastify closes', async () => {
+    const isolated = await createTestApp();
+    await isolated.close();
+
+    await expect(isolated.mqtt.subscribe('factory/winders/#', async () => {})).rejects.toThrow();
+  });
+});
