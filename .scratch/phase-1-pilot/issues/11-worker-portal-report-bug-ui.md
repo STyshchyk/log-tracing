@@ -4,10 +4,10 @@
 
 **Blocked by:** 05: Worker Portal Landing Shell & Unknown-Machine Handling, 10: Bug Report API with Auto-Attached 20-Event Snapshot
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Tapping `Report a Bug` from the machine landing screen presents large, touch-friendly 1-tap quick-tag choices (`Fiber Snap`, `Tension`, `Unit Dead`, `Bobbin Jam`, `Other`) and a standard plain-text textarea (compatible with Android's built-in keyboard mic; zero custom Web Speech API and zero photo-upload controls).
-- [ ] Submitting with a quick tag (with or without a note) saves the bug report with the auto-attached telemetry snapshot and displays clear confirmation feedback with a return link to the machine home screen.
-- [ ] Submission disables or guards against accidental double-taps to avoid duplicate bug reports on handheld touchscreens.
-- [ ] Missing quick tag selection produces clear inline validation feedback without losing typed notes.
-- [ ] Verified end-to-end via Fastify `app.inject()` confirming form submission persists the bug report and renders confirmation.
+- [x] Tapping `Report a Bug` from the machine landing screen presents large, touch-friendly 1-tap quick-tag choices (`Fiber Snap`, `Tension`, `Unit Dead`, `Bobbin Jam`, `Other`) and a standard plain-text textarea (compatible with Android's built-in keyboard mic; zero custom Web Speech API and zero photo-upload controls).
+- [x] Submitting with a quick tag (with or without a note) saves the bug report with the auto-attached telemetry snapshot and displays clear confirmation feedback with a return link to the machine home screen.
+- [x] Submission disables or guards against accidental double-taps to avoid duplicate bug reports on handheld touchscreens.
+- [x] Missing quick tag selection produces clear inline validation feedback without losing typed notes.
+- [x] Verified end-to-end via Fastify `app.inject()` confirming form submission persists the bug report and renders confirmation.
