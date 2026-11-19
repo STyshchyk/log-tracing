@@ -13,6 +13,7 @@ import { registerEventsApi } from './routes/events-api.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
 import { registerWorkerBugReport } from './routes/worker-bug-report.js';
+import { registerWorkerGlossary } from './routes/worker-glossary.js';
 import { registerWorkerPortal } from './routes/worker-portal.js';
 
 /**
@@ -111,6 +112,7 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerBugReportsApi(app, deps.db);
   registerCoilsApi(app, deps.db);
   registerWorkerPortal(app, deps.db);
+  registerWorkerGlossary(app, deps.db);
   registerWorkerBugReport(app, deps.db);
 
   app.addHook('onClose', async () => {

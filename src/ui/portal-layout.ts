@@ -442,8 +442,7 @@ export function renderPortalLayout(options: PortalLayoutOptions): string {
   const headerHtml = options.backHref
     ? `<header class="portal-header"><nav aria-label="Portal navigation"><a class="back-link" href="${escapeHtml(options.backHref)}"><span aria-hidden="true">&#8592;</span><span>${escapeHtml(options.backLabel ?? 'All Machines')}</span></a></nav></header>`
     : '';
-
-  const combinedStyles = options.extraStyles
+  const styles = options.extraStyles
     ? `${PORTAL_STYLES}\n${options.extraStyles}`
     : PORTAL_STYLES;
 
@@ -453,7 +452,7 @@ export function renderPortalLayout(options: PortalLayoutOptions): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>${escapeHtml(options.title)}</title>
-  <style>${combinedStyles}</style>
+  <style>${styles}</style>
 </head>
 <body>
   <div class="portal-shell">
