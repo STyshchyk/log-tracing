@@ -5,7 +5,7 @@ trigger: always_on
 # Ops gotchas (log-telemetry)
 
 - **Shell:** Windows PowerShell. Don't chain with `&&`. Use `cmd1; if ($LASTEXITCODE -eq 0) { cmd2 }`.
-- **Live Docker app reload:** When `log-telemetry-app-1` is running in Docker (`:3000`), host edits to `src/` (including SSR UI in `src/ui/`) require `docker compose up -d --build app` to take effect in the browser.
+- **Live Docker app reload:** When `log-telemetry-app-1` is running in Docker (`:3000`), host edits to `src/` (including SSR UI in `src/ui/`) require `docker compose up -d --build app` to take effect in the browser. If BuildKit fails fetching `auth.docker.io` metadata (`connectex` socket permission error), retry with `$env:DOCKER_BUILDKIT=0; docker compose up -d --build app` to build against local cached base images.
 - **Docker images:** Never guess a tag. Pin a verified version (e.g. `grafana/grafana:11.6.2`; `grafana/grafana-oss` is deprecated and has no `:11` tag). If it won't pull, report it instead of guessing.
 - **Docker Compose profiles:** Compose interpolates `${VAR}` across all services in `docker-compose.yml` even when a service's profile (`remote`, `engineering`) is inactive. Never use `${VAR:?error}` for profile-only secrets (e.g. `CF_TOKEN`); use `${VAR:-}` so default `docker compose up` and `docker compose config` succeed without `.env`.
 - **Schema (`db/init.sql`):** Runs on every `ensureSchema()` call, concurrently in tests. Guard every `ALTER TABLE`, constraint change and view (re)creation with `DO $$ IF NOT EXISTS ... $$` so repeat runs take no `ACCESS EXCLUSIVE` locks. An unconditional `ALTER TABLE` followed by `CREATE OR REPLACE VIEW` deadlocks against concurrent view reads.
