@@ -28,14 +28,14 @@ On-premises MQTT telemetry ingestion, TimescaleDB storage, crash/brownout forens
 | `docs/` | `PILOT_RUNBOOK.md`, `FLEET_RUNBOOK.md`, `ENGINEERING_RUNBOOK.md`, `fleet-seed.csv` (`W-01`–`W-50`), `docs/agents/*` |
 | `.scratch/phase-{1-pilot,2-fleet,3-engineering}/` | Phase specs (`spec.md`) and ticket files (`issues/`) |
 | `src/server.ts`, `src/app.ts` | Process entrypoint (`ensureSchema` + `seedPilotMachines`) and Fastify app factory (`seedGlossary`, routes, MQTT subscribers) |
-| `src/auth/cloudflare-access.ts` | RS256 JWKS verification (`node:crypto`), email allowlist, LAN fallback, fail-closed `503` |
+| `src/auth/{cloudflare-access,jwks-verifier}.ts` | Fastify `preHandler`, RS256 JWKS verification (`node:crypto`), email allowlist, LAN fallback, fail-closed `503` |
 | `src/spec/{fault-registry,mqtt-contract}.ts` | `error_codes.json` loader, canonical domain enums/constants, strict Zod schemas (`status`, `events`, `coil`), topic/payload parsers |
 | `src/db/{pool,seed-glossary,seed-pilot-machines,seed-fleet-machines}.ts` | `pg` pool + advisory-locked `ensureSchema(db)`, idempotent glossary/pilot/50-winder CSV seeders |
 | `src/mqtt/{transport,ingestion-helpers,status-ingestion,events-ingestion,coil-ingestion}.ts` | Mosquitto & in-memory transports, `< 1024` byte & Zod guardrails, `factory/winders/+/{status,events,coil}` DB writers |
-| `src/services/{machines,telemetry-events,glossary,bug-reports,coil-rollups,fleet}.ts` | Parameterized SQL query services, active-error glossary pinning, transactional 20-event bug-report snapshot, fleet summary/history/details |
+| `src/services/{machines,telemetry-events,glossary,bug-reports,coil-rollups,fleet,fleet-history}.ts` | Parameterized SQL query services, active-error glossary pinning, transactional 20-event bug-report snapshot, fleet summary/history/details |
 | `src/routes/{api-schemas,machines-api,events-api,glossary-api,bug-reports-api,coils-api,fleet-api}.ts` | OpenAPI-validated JSON endpoints (`/api/*` public, `/api/fleet/*` fleet-authed) |
 | `src/routes/{worker-portal,worker-glossary,worker-bug-report,fleet-portal}.ts` | Hidden-from-OpenAPI SSR HTML routes (`/`, `/m/*`, `/fleet*`) |
-| `src/ui/{portal-layout,markdown,recent-errors-section,fleet-layout}.ts` | Zero-CDN SSR HTML layouts, `escapeHtml`, safe Markdown list/code renderer, `/fleet` L-shaped grid + `<dialog>` drawer + 10s polling |
+| `src/ui/{portal-layout,portal-styles,worker-glossary-view,worker-bug-report-view,markdown,recent-errors-section,fleet-layout}.ts`, `src/ui/fleet/{floor-plan,fleet-styles,fleet-blueprint-styles,fleet-client-script}.ts` | Zero-CDN SSR HTML layouts, `escapeHtml`, safe Markdown renderer, Worker & `/fleet` 44-unit L-shaped workshop blueprint (`#1`–`#44` + `#45`–`#50` overflow bay) + `<dialog>` drawer + 10s polling |
 | `tests/` | `tests/helpers/test-app.ts` (`createTestApp`), unit/integration tests (`tests/*.test.ts`), live Mosquitto LWT smoke test (`tests/smoke/`) |
 
 ---
@@ -60,7 +60,7 @@ On-premises MQTT telemetry ingestion, TimescaleDB storage, crash/brownout forens
 
 - **States:** `WORKING`, `IDLE`, `ERROR`, `OFFLINE` (LWT `{"state":"OFFLINE"}` preserves pre-outage `active_error`).
 - **Coil outcomes:** `AUTO_FINISHED`, `ABORTED`, `FAULT_TERMINATED` + optional `wound_length` (CRM/QR `COMPLETED`/`FAILED`/`REDO` are excluded).
-- **Floor zones:** `NORTH_LEFT`, `NORTH_RIGHT`, `MAIN_BANK`, `EAST_DOOR`.
+- **Floor zones & `/fleet` schematic:** `NORTH_LEFT`, `NORTH_RIGHT`, `MAIN_BANK`, `EAST_DOOR`. Backend/CSV keeps 50 IDs (`W-01`–`W-50`); `/fleet` maps `W-01`–`W-44` to `#1`–`#44` on the 44-unit L-shaped schematic (Narrow Wing `#1`–`#7` + `#8`–`#12`, Main Hall Rows `5+7+6+6` `#13`–`#36`, Right Stack `4×2` `#37`–`#44`) and places `W-45`–`W-50` (`#45`–`#50`) in the reserve bay below.
 - **Bug report quick tags:** `Fiber Snap`, `Tension`, `Unit Dead`, `Bobbin Jam`, `Other`.
 - **Fault codes (`error_code`):** `^[A-Z](?:[A-Z0-9]|_[A-Z0-9])*$`, source of truth in `spec/error_codes.json`.
 - **MQTT & Firmware:** Payloads `< 1024` UTF-8 bytes; strict schemas; retained `status`, non-retained `events`/`coil`; update `spec/` rather than external C++ firmware.

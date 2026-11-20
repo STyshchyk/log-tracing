@@ -71,7 +71,20 @@ describe('Department Heads /fleet SSR PWA and web manifest', () => {
     expect(html).toContain('id="panel-glossary" aria-labelledby="tab-glossary" hidden="until-found"');
     expect(html).toContain('beforematch');
 
-    // L-shaped floor map zones & machine buttons
+    // Architectural 44-Machine-Tool Workshop Floor Plan + L-shaped floor zones & machine buttons
+    expect(html).toContain('WORKSHOP FLOOR PLAN — 44 MACHINE TOOLS');
+    expect(html).toContain('44 UNITS');
+    expect(html).toContain('NARROW WING');
+    expect(html).toContain('12 UNITS (7 + 5)');
+    expect(html).toContain('MAIN HALL ROWS:');
+    expect(html).toContain('24 UNITS (5 + 7 + 6 + 6)');
+    expect(html).toContain('RIGHT STACK:');
+    expect(html).toContain('8 UNITS (4 &times; 2)');
+    expect(html).toContain('ROW 1 (5 UNITS');
+    expect(html).toContain('ROW 2 (7 UNITS');
+    expect(html).toContain('ROW 3 (6 UNITS');
+    expect(html).toContain('ROW 4 (6 UNITS');
+    expect(html).toContain('&#1041;&#1056;&#1040;&#1050;');
     expect(html).toContain('data-zone="NORTH_LEFT"');
     expect(html).toContain('data-zone="NORTH_RIGHT"');
     expect(html).toContain('data-zone="MAIN_BANK"');
