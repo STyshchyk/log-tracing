@@ -15,7 +15,8 @@ export type CoilIngestionLogger = MqttIngestionLogger;
 
 /**
  * Subscribe to `factory/winders/+/coil` on the MQTT transport and persist valid
- * `COMPLETED` / `ABORTED` coil outcomes for registered machines into `coil_outcomes`.
+ * ESP32 internal cycle outcomes (`AUTO_FINISHED`, `ABORTED`, `FAULT_TERMINATED`)
+ * and optional `wound_length` for registered machines into `coil_outcomes`.
  */
 export async function registerCoilIngestion(
   mqtt: MqttTransport,
@@ -43,8 +44,8 @@ export async function registerCoilIngestion(
       }
 
       const insertResult = await db.query<{ id: string }>(
-        `INSERT INTO coil_outcomes (machine_id, outcome, reason_code, duration_sec, created_at)
-         SELECT m.id, $2::text, $3::text, $4::integer, COALESCE($5::timestamptz, NOW())
+        `INSERT INTO coil_outcomes (machine_id, outcome, reason_code, duration_sec, wound_length, created_at)
+         SELECT m.id, $2::text, $3::text, $4::integer, $5::double precision, COALESCE($6::timestamptz, NOW())
          FROM machines m
          WHERE m.id = $1::text
          RETURNING id`,
@@ -53,6 +54,7 @@ export async function registerCoilIngestion(
           payload.outcome,
           payload.reason_code ?? null,
           payload.duration_sec ?? null,
+          payload.wound_length ?? null,
           timestampResult.date,
         ],
       );

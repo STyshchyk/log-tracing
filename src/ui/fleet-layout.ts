@@ -62,11 +62,10 @@ function serializeJsonForScript(value: unknown): string {
     .replace(/&/g, '\\u0026');
 }
 
-function formatCompletionRate(completed: number, total: number): string {
-  if (total <= 0) {
-    return '0%';
-  }
-  return `${Math.round((completed / total) * 100)}%`;
+function formatWoundLength(value: number): string {
+  const safe = Number.isFinite(value) ? value : 0;
+  const rounded = Math.round(safe * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function renderZoneBay(zone: FloorZone, machines: readonly MachineRecord[]): string {
@@ -993,6 +992,13 @@ const FLEET_CLIENT_SCRIPT = `
     return d.toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
   }
 
+  function formatWoundLength(value) {
+    const safe = typeof value === 'number' && Number.isFinite(value) ? value : Number(value);
+    const normalized = Number.isFinite(safe) ? safe : 0;
+    const rounded = Math.round(normalized * 10) / 10;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  }
+
   function appendInlineCode(parent, text) {
     let cursor = 0;
     const str = String(text || '');
@@ -1116,17 +1122,16 @@ const FLEET_CLIENT_SCRIPT = `
     const rollups = Array.isArray(state.summary.coil_rollups) ? state.summary.coil_rollups : [];
     const bucket = rollups.find((r) => r.window === state.selectedWindow) || rollups[0];
     if (bucket) {
-      const compEl = document.getElementById('coil-completed');
+      const autoEl = document.getElementById('coil-auto-finished');
       const abortEl = document.getElementById('coil-aborted');
-      const totEl = document.getElementById('coil-total');
-      const rateEl = document.getElementById('coil-rate');
-      if (compEl) compEl.textContent = String(bucket.completed_count);
-      if (abortEl) abortEl.textContent = String(bucket.aborted_count);
-      if (totEl) totEl.textContent = String(bucket.total_count);
-      if (rateEl) {
-        const pct = bucket.total_count > 0 ? Math.round((bucket.completed_count / bucket.total_count) * 100) : 0;
-        rateEl.textContent = pct + '%';
-      }
+      const faultEl = document.getElementById('coil-fault-terminated');
+      const woundEl = document.getElementById('coil-wound-length');
+      const totCyclesEl = document.getElementById('coil-total-cycles');
+      if (autoEl) autoEl.textContent = String(bucket.auto_finished_count ?? 0);
+      if (abortEl) abortEl.textContent = String(bucket.aborted_count ?? 0);
+      if (faultEl) faultEl.textContent = String(bucket.fault_terminated_count ?? 0);
+      if (woundEl) woundEl.textContent = formatWoundLength(bucket.total_wound_length ?? 0);
+      if (totCyclesEl) totCyclesEl.textContent = String(bucket.total_count ?? 0) + ' cycles';
     }
   }
 
@@ -1348,13 +1353,13 @@ const FLEET_CLIENT_SCRIPT = `
       drawerBody.appendChild(gSec);
     }
 
-    // Coil Rollups
+    // ESP32 Winding Cycle Rollups
     const coilSec = el('div', 'drawer-section');
-    coilSec.appendChild(el('h3', '', 'Coil Production Rollups'));
+    coilSec.appendChild(el('h3', '', 'Winding Cycle Telemetry (ESP32)'));
     const table = el('table', 'rollup-table');
     const thead = document.createElement('thead');
     const hRow = document.createElement('tr');
-    for (const h of ['Window', 'Completed', 'Aborted', 'Total']) {
+    for (const h of ['Window', 'Auto-Finished', 'Aborted', 'Fault-Stopped', 'Total', 'Wound Fiber']) {
       hRow.appendChild(el('th', '', h));
     }
     thead.appendChild(hRow);
@@ -1363,9 +1368,11 @@ const FLEET_CLIENT_SCRIPT = `
     for (const row of details.coil_rollups || []) {
       const tr = document.createElement('tr');
       tr.appendChild(el('td', '', row.window));
-      tr.appendChild(el('td', '', row.completed_count));
-      tr.appendChild(el('td', '', row.aborted_count));
-      tr.appendChild(el('td', '', row.total_count));
+      tr.appendChild(el('td', '', row.auto_finished_count ?? 0));
+      tr.appendChild(el('td', '', row.aborted_count ?? 0));
+      tr.appendChild(el('td', '', row.fault_terminated_count ?? 0));
+      tr.appendChild(el('td', '', row.total_count ?? 0));
+      tr.appendChild(el('td', '', formatWoundLength(row.total_wound_length ?? 0)));
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
@@ -1662,9 +1669,11 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
     summary.coil_rollups.find((bucket) => bucket.window === 'TODAY') ??
     summary.coil_rollups[0] ?? {
       window: 'TODAY' as const,
-      completed_count: 0,
+      auto_finished_count: 0,
       aborted_count: 0,
+      fault_terminated_count: 0,
       total_count: 0,
+      total_wound_length: 0,
     };
 
   const authSummary =
@@ -1715,7 +1724,7 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
       Session expired or unauthorized. <a href="/fleet">Reload page</a> to sign in again through Cloudflare Access.
     </div>
 
-    <section class="summary-strip" aria-label="Fleet status and production summary">
+    <section class="summary-strip" aria-label="Fleet status and winding cycle summary">
       <div class="card">
         <div class="state-counts-grid">
           <div class="metric-box">
@@ -1747,8 +1756,11 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
 
       <div class="card">
         <div class="coil-summary-header">
-          <h2>Coil Outcomes</h2>
-          <div class="window-toggle-group" role="group" aria-label="Coil summary time window">
+          <div>
+            <h2>Winding Cycles (ESP32)</h2>
+            <span class="machine-meta" id="coil-total-cycles">${defaultBucket.total_count} cycles</span>
+          </div>
+          <div class="window-toggle-group" role="group" aria-label="Winding cycle summary time window">
             ${summary.coil_rollups
               .map(
                 (bucket) => `<button type="button" class="window-btn" data-coil-window="${escapeHtml(bucket.window)}" aria-pressed="${bucket.window === 'TODAY' ? 'true' : 'false'}">${escapeHtml(ROLLUP_WINDOW_LABELS[bucket.window])}</button>`,
@@ -1758,20 +1770,20 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
         </div>
         <div class="coil-metrics-row">
           <div class="metric-box status-working">
-            <span class="metric-label">Completed</span>
-            <span class="metric-value" id="coil-completed">${defaultBucket.completed_count}</span>
+            <span class="metric-label">Auto-Finished</span>
+            <span class="metric-value" id="coil-auto-finished">${defaultBucket.auto_finished_count}</span>
           </div>
-          <div class="metric-box status-error">
+          <div class="metric-box status-idle">
             <span class="metric-label">Aborted</span>
             <span class="metric-value" id="coil-aborted">${defaultBucket.aborted_count}</span>
           </div>
-          <div class="metric-box">
-            <span class="metric-label">Total Coils</span>
-            <span class="metric-value" id="coil-total">${defaultBucket.total_count}</span>
+          <div class="metric-box status-error">
+            <span class="metric-label">Fault-Stopped</span>
+            <span class="metric-value" id="coil-fault-terminated">${defaultBucket.fault_terminated_count}</span>
           </div>
           <div class="metric-box">
-            <span class="metric-label">Completion</span>
-            <span class="metric-value" id="coil-rate">${escapeHtml(formatCompletionRate(defaultBucket.completed_count, defaultBucket.total_count))}</span>
+            <span class="metric-label">Wound Fiber</span>
+            <span class="metric-value" id="coil-wound-length">${escapeHtml(formatWoundLength(defaultBucket.total_wound_length))}</span>
           </div>
         </div>
       </div>

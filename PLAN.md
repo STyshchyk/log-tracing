@@ -24,7 +24,7 @@
 3. **Remote Access & HTTPS:**
    - `cloudflared` container + `~$10/yr` domain + Cloudflare Access email login for remote heads, plus local LAN fallback URL.
 
-## Phase 3 — Engineering, Photos & Expansion
-1. **Grafana OSS (`grafana/provisioning/`):** Pre-configured Postgres datasource and dev dashboards (`esp_reset_reason()`, Wi-Fi RSSI, free heap, cycle duration) with deep-links to Glossary.
-2. **Bug Report Photos:** Client-side `<canvas>` JPEG compression (`~120 KB`) + local `./uploads` storage + 90-day cleanup cron.
-3. **Expansion:** Onboard additional factory machine tools using the same MQTT contract; optionally revisit QR-redirect proxy for `Redo` tracking.
+## Phase 3 — Engineering Observability & ESP32 Cycle Telemetry
+1. **ESP32 Internal Cycle Telemetry:** Replace CRM-like cycle labels with ESP32 internal stop modes (`AUTO_FINISHED`, `ABORTED`, `FAULT_TERMINATED`) plus total `wound_length` across the MQTT contract, TimescaleDB schema/views, JSON APIs, and `/fleet` UI (no QR/CRM `Redo` proxy).
+2. **Grafana OSS (`--profile engineering`, `grafana/provisioning/`):** Optional Compose profile on LAN port `3001` (with optional Cloudflare Access remote route), pre-configured TimescaleDB/Postgres datasource, and engineering dashboards (`esp_reset_reason()`, Wi-Fi RSSI, free heap, wound fiber length, cycle duration, fault/bug correlation) with deep-links to Glossary and Worker Portal.
+3. **Explicitly Excluded / Deferred:** No voice-to-text/speech and no bug-report photo attachments (`bug_reports.photo_path` stays unused/nullable for schema compatibility); non-winder factory machine expansion deferred to a future phase.

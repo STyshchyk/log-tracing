@@ -115,14 +115,21 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
       'ALL_TIME',
     ]);
     for (const bucket of summary.coil_rollups) {
-      expect(bucket.completed_count).toBeGreaterThanOrEqual(0);
+      expect(bucket.auto_finished_count).toBeGreaterThanOrEqual(0);
       expect(bucket.aborted_count).toBeGreaterThanOrEqual(0);
-      expect(bucket.completed_count + bucket.aborted_count).toBe(bucket.total_count);
+      expect(bucket.fault_terminated_count).toBeGreaterThanOrEqual(0);
+      expect(
+        bucket.auto_finished_count + bucket.aborted_count + bucket.fault_terminated_count,
+      ).toBe(bucket.total_count);
+      expect(bucket.total_wound_length).toBeGreaterThanOrEqual(0);
     }
     const [today, week, month, allTime] = summary.coil_rollups;
     expect(today!.total_count).toBeLessThanOrEqual(week!.total_count);
     expect(week!.total_count).toBeLessThanOrEqual(month!.total_count);
     expect(month!.total_count).toBeLessThanOrEqual(allTime!.total_count);
+    expect(today!.total_wound_length).toBeLessThanOrEqual(week!.total_wound_length);
+    expect(week!.total_wound_length).toBeLessThanOrEqual(month!.total_wound_length);
+    expect(month!.total_wound_length).toBeLessThanOrEqual(allTime!.total_wound_length);
   });
 
   it('GET /api/fleet/machines filters by state and zone and preserves deterministic ordering', async () => {
@@ -225,8 +232,12 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
     );
 
     await ctx.db.query(
-      `INSERT INTO coil_outcomes (machine_id, outcome, duration_sec)
-       VALUES ($1, 'COMPLETED', 90), ($1, 'COMPLETED', 95), ($1, 'ABORTED', 30)`,
+      `INSERT INTO coil_outcomes (machine_id, outcome, duration_sec, wound_length)
+       VALUES
+         ($1, 'AUTO_FINISHED', 90, 110.5),
+         ($1, 'AUTO_FINISHED', 95, 115.0),
+         ($1, 'ABORTED', 30, 32.5),
+         ($1, 'FAULT_TERMINATED', 45, 48.0)`,
       [machineId],
     );
 
@@ -258,10 +269,12 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
 
     const allTime = rollupMap(details.coil_rollups).ALL_TIME;
     expect(allTime).toMatchObject({
-      completed_count: 2,
+      auto_finished_count: 2,
       aborted_count: 1,
-      total_count: 3,
+      fault_terminated_count: 1,
+      total_count: 4,
     });
+    expect(allTime?.total_wound_length).toBeCloseTo(306, 5);
   });
 
   it('GET /api/fleet/history merges room-wide error events and bug reports with kind, zone, machineId, and limit filters', async () => {

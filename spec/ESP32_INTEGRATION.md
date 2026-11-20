@@ -48,7 +48,7 @@ enum class WinderEventType : uint8_t {
   INFO = 7,
 };
 
-enum class CoilOutcome : uint8_t { COMPLETED = 0, ABORTED = 1 };
+enum class CoilOutcome : uint8_t { AUTO_FINISHED = 0, ABORTED = 1, FAULT_TERMINATED = 2 };
 
 // Synchronized with spec/error_codes.json
 enum class WinderErrorCode : uint16_t {
@@ -81,6 +81,7 @@ struct TelemetryMsg {
       CoilOutcome outcome;
       WinderErrorCode reason_code;
       uint32_t duration_sec;
+      float wound_length;
     } coil;
   } data;
 };
@@ -237,14 +238,14 @@ Configure Last Will & Testament at MQTT client initialization (before connecting
    - Flush pending ring-buffer `events` and `coil` records (including the boot `BOOT` / `CRASH_RESET` event captured at startup).
 2. **On Cycle Start (`IDLE` -> `WORKING`):**
    - Publish retained `status`: `{"state":"WORKING"}` (`retain=true`). Backend automatically clears any prior `active_error`.
-3. **On Cycle Normal Finish (`WORKING` -> `IDLE`):**
-   - Publish `coil`: `{"outcome":"COMPLETED","duration_sec":<elapsed_s>}` (`retain=false`, `qos=1`).
+3. **On Cycle Automatic Finish (`WORKING` -> `IDLE`):**
+   - Publish `coil`: `{"outcome":"AUTO_FINISHED","duration_sec":<elapsed_s>,"wound_length":<length>}` (`retain=false`, `qos=1`).
    - Publish retained `status`: `{"state":"IDLE"}` (`retain=true`).
-4. **On Fault / Fiber Snap / Tension Fault / Jam / Timeout (`WORKING` -> `ERROR`):**
-   - Publish retained `status`: `{"state":"ERROR","error_code":"ERR_..."}` (`retain=true`, `qos=1`).
-   - Publish `events`: `{"event_type":"ERROR" | "SUBSYSTEM_TIMEOUT" | "FAULT","error_code":"ERR_...","subsystem":"...","rssi":...,"free_heap":...,"message":"..."}` (`retain=false`, `qos=1`).
-   - If a winding cycle was active when aborted/stopped, publish `coil`: `{"outcome":"ABORTED","reason_code":"ERR_...","duration_sec":<elapsed_s>}` (`retain=false`, `qos=1`).
-   - **Never publish `"REDO"`** on `coil`—Phase 1 accepts only `"COMPLETED"` and `"ABORTED"`.
+4. **On Explicit Abort vs. Unexpected Fault Termination (`WORKING` -> `ERROR` or `IDLE`):**
+   - On fault/timeout (`ERR_FIBER_SNAP`, `ERR_TENSION_FAULT`, `ERR_BOBBIN_JAM`, `ERR_SUBSYSTEM_TIMEOUT`): publish retained `status`: `{"state":"ERROR","error_code":"ERR_..."}` (`retain=true`, `qos=1`) and `events`: `{"event_type":"ERROR" | "SUBSYSTEM_TIMEOUT" | "FAULT","error_code":"ERR_...","subsystem":"...","rssi":...,"free_heap":...,"message":"..."}` (`retain=false`, `qos=1`).
+   - If a winding cycle stopped due to unexpected fault/crash behavior, publish `coil`: `{"outcome":"FAULT_TERMINATED","reason_code":"ERR_...","duration_sec":<elapsed_s>,"wound_length":<length>}` (`retain=false`, `qos=1`).
+   - If a winding cycle was explicitly aborted by operator stop/cancel before automatic finish, publish `coil`: `{"outcome":"ABORTED","reason_code":"OPERATOR_ABORT","duration_sec":<elapsed_s>,"wound_length":<length>}` (`retain=false`, `qos=1`).
+   - **Never publish CRM/QR statuses (`"REDO"`, `"COMPLETED"`, `"FAILED"`)** on `coil` — only `"AUTO_FINISHED"`, `"ABORTED"`, and `"FAULT_TERMINATED"` are accepted.
 5. **On Fault Cleared (`ERROR` -> `IDLE` or `WORKING`):**
    - Publish retained `status`: `{"state":"IDLE"}` (or `{"state":"WORKING"}`) with `retain=true`. Backend automatically clears `active_error`.
 
@@ -283,6 +284,6 @@ Before flashing onto shop-floor machines, verify a pilot ESP32 against the local
    ```
 2. **Boot & Diagnostics:** Power on ESP32; confirm retained `factory/winders/W-01/status` = `{"state":"IDLE"}` and `factory/winders/W-01/events` receives `BOOT` (or `CRASH_RESET`) with `reset_reason`, `rssi`, and `free_heap`.
 3. **Fault & Glossary Pinning:** Trigger a test fault (e.g., `ERR_FIBER_SNAP`); verify `GET http://<server-lan-ip>:3000/api/machines/W-01` shows `current_state: "ERROR"` and `active_error: "ERR_FIBER_SNAP"`, and `GET /m/W-01/glossary` pins `ERR_FIBER_SNAP` at the top.
-4. **Cycle Outcomes:** Complete one cycle and abort one cycle; confirm `COMPLETED` and `ABORTED` payloads are accepted and < 1024 bytes.
+4. **Cycle Outcomes:** Emit `AUTO_FINISHED`, `ABORTED`, and `FAULT_TERMINATED` payloads with `duration_sec` and `wound_length`; confirm CRM statuses (`COMPLETED`, `REDO`) are rejected and valid payloads are `< 1024` bytes.
 5. **Wi-Fi Drop Ring-Buffer:** Disable AP / block Wi-Fi for 30 seconds while triggering events, restore Wi-Fi, and verify buffered events arrive in `GET /api/machines/W-01/events` without crashing or stalling Core 1.
 6. **LWT Offline Detection:** Unplug ESP32 USB/power cleanly without calling `disconnect()`; confirm within ~1.5x keepalive (`~30s`) Mosquitto publishes LWT `{"state":"OFFLINE"}` and `GET /m/W-01` shows `OFFLINE`.

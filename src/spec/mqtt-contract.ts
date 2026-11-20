@@ -66,12 +66,12 @@ export const ERROR_EVENT_TYPES = [
 export type ErrorEventType = (typeof ERROR_EVENT_TYPES)[number];
 
 /**
- * Canonical automatic coil cycle outcomes (REDO intentionally excluded in Phase 1).
+ * Canonical ESP32 internal winding cycle stop modes (CRM/QR outcomes such as COMPLETED/FAILED/REDO are excluded).
  */
-export const COIL_OUTCOMES = ['COMPLETED', 'ABORTED'] as const;
+export const COIL_OUTCOMES = ['AUTO_FINISHED', 'ABORTED', 'FAULT_TERMINATED'] as const;
 
 /**
- * Canonical coil outcome union.
+ * Canonical ESP32 winding cycle outcome union.
  */
 export type CoilOutcome = (typeof COIL_OUTCOMES)[number];
 
@@ -143,13 +143,15 @@ export const eventPayloadSchema = z.strictObject({
 export type EventPayload = z.infer<typeof eventPayloadSchema>;
 
 /**
- * Schema for `factory/winders/{machineId}/coil` automatic cycle outcome payloads.
- * Explicitly accepts only `COMPLETED` and `ABORTED` (`REDO` is excluded in Phase 1).
+ * Schema for `factory/winders/{machineId}/coil` ESP32 internal cycle outcome payloads.
+ * Accepts only `AUTO_FINISHED`, `ABORTED`, and `FAULT_TERMINATED` plus optional `wound_length`.
+ * CRM/QR outcomes (`COMPLETED`, `FAILED`, `REDO`) are explicitly rejected.
  */
 export const coilPayloadSchema = z.strictObject({
   outcome: z.enum(COIL_OUTCOMES),
   reason_code: nonEmptyText.nullish(),
   duration_sec: z.number().int().nonnegative().optional(),
+  wound_length: z.number().finite().nonnegative().optional(),
   ts: timestampSchema.optional(),
 });
 

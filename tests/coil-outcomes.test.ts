@@ -33,29 +33,31 @@ describe('coil outcome ingestion and rollup views', () => {
     return id;
   }
 
-  it('persists valid COMPLETED and ABORTED coil outcomes with optional reason_code, duration_sec, and ts variants', async () => {
+  it('persists valid AUTO_FINISHED, ABORTED, and FAULT_TERMINATED outcomes with optional wound_length, reason_code, duration_sec, and ts variants', async () => {
     const machineId = await registerMachine('INGEST');
     const beforeIngest = new Date();
 
     await ctx.mqtt.emit(
       `factory/winders/${machineId}/coil`,
-      JSON.stringify({ outcome: 'COMPLETED', duration_sec: 148 }),
+      JSON.stringify({ outcome: 'AUTO_FINISHED', duration_sec: 148, wound_length: 124.5 }),
     );
     await ctx.mqtt.emit(
       `factory/winders/${machineId}/coil`,
       JSON.stringify({
-        outcome: 'ABORTED',
+        outcome: 'FAULT_TERMINATED',
         reason_code: 'ERR_FIBER_SNAP',
         duration_sec: 43,
+        wound_length: 52.25,
         ts: '2026-11-19T12:00:00Z',
       }),
     );
     await ctx.mqtt.emit(
       `factory/winders/${machineId}/coil`,
       JSON.stringify({
-        outcome: 'COMPLETED',
+        outcome: 'AUTO_FINISHED',
         reason_code: null,
         duration_sec: 0,
+        wound_length: 0,
         ts: 1763553600,
       }),
     );
@@ -70,7 +72,7 @@ describe('coil outcome ingestion and rollup views', () => {
     await ctx.mqtt.emit(
       `factory/winders/${machineId}/coil`,
       JSON.stringify({
-        outcome: 'COMPLETED',
+        outcome: 'AUTO_FINISHED',
         duration_sec: 95,
         ts: 45120,
       }),
@@ -79,8 +81,10 @@ describe('coil outcome ingestion and rollup views', () => {
       `factory/winders/${machineId}/coil`,
       Buffer.from(
         JSON.stringify({
-          outcome: 'COMPLETED',
+          outcome: 'FAULT_TERMINATED',
+          reason_code: 'ERR_BOBBIN_JAM',
           duration_sec: 160,
+          wound_length: 88,
           ts: '2026-11-19T14:00:00+02:00',
         }),
         'utf8',
@@ -94,9 +98,10 @@ describe('coil outcome ingestion and rollup views', () => {
       outcome: string;
       reason_code: string | null;
       duration_sec: number | null;
+      wound_length: number | null;
       created_at: Date;
     }>(
-      `SELECT machine_id, outcome, reason_code, duration_sec, created_at
+      `SELECT machine_id, outcome, reason_code, duration_sec, wound_length, created_at
        FROM coil_outcomes
        WHERE machine_id = $1
        ORDER BY id ASC`,
@@ -105,25 +110,31 @@ describe('coil outcome ingestion and rollup views', () => {
 
     expect(rows.rows).toHaveLength(6);
 
-    expect(rows.rows[0]?.outcome).toBe('COMPLETED');
-    expect(rows.rows[0]?.reason_code).toBeNull();
-    expect(rows.rows[0]?.duration_sec).toBe(148);
+    expect(rows.rows[0]).toMatchObject({
+      machine_id: machineId,
+      outcome: 'AUTO_FINISHED',
+      reason_code: null,
+      duration_sec: 148,
+    });
+    expect(rows.rows[0]?.wound_length).toBeCloseTo(124.5, 5);
     expect(rows.rows[0]!.created_at.getTime()).toBeGreaterThanOrEqual(beforeIngest.getTime() - 2000);
     expect(rows.rows[0]!.created_at.getTime()).toBeLessThanOrEqual(afterIngest.getTime() + 2000);
 
     expect(rows.rows[1]).toMatchObject({
       machine_id: machineId,
-      outcome: 'ABORTED',
+      outcome: 'FAULT_TERMINATED',
       reason_code: 'ERR_FIBER_SNAP',
       duration_sec: 43,
     });
+    expect(rows.rows[1]?.wound_length).toBeCloseTo(52.25, 5);
     expect(rows.rows[1]?.created_at.toISOString()).toBe('2026-11-19T12:00:00.000Z');
 
     expect(rows.rows[2]).toMatchObject({
       machine_id: machineId,
-      outcome: 'COMPLETED',
+      outcome: 'AUTO_FINISHED',
       reason_code: null,
       duration_sec: 0,
+      wound_length: 0,
     });
     expect(rows.rows[2]?.created_at.toISOString()).toBe('2025-11-19T12:00:00.000Z');
 
@@ -132,28 +143,31 @@ describe('coil outcome ingestion and rollup views', () => {
       outcome: 'ABORTED',
       reason_code: 'OPERATOR_ABORT',
       duration_sec: null,
+      wound_length: null,
     });
     expect(rows.rows[3]?.created_at.toISOString()).toBe('2025-11-19T12:00:05.123Z');
 
     expect(rows.rows[4]).toMatchObject({
       machine_id: machineId,
-      outcome: 'COMPLETED',
+      outcome: 'AUTO_FINISHED',
       reason_code: null,
       duration_sec: 95,
+      wound_length: null,
     });
     expect(rows.rows[4]!.created_at.getTime()).toBeGreaterThanOrEqual(beforeIngest.getTime() - 2000);
     expect(rows.rows[4]!.created_at.getTime()).toBeLessThanOrEqual(afterIngest.getTime() + 2000);
 
     expect(rows.rows[5]).toMatchObject({
       machine_id: machineId,
-      outcome: 'COMPLETED',
-      reason_code: null,
+      outcome: 'FAULT_TERMINATED',
+      reason_code: 'ERR_BOBBIN_JAM',
       duration_sec: 160,
+      wound_length: 88,
     });
     expect(rows.rows[5]?.created_at.toISOString()).toBe('2026-11-19T12:00:00.000Z');
   });
 
-  it('rejects REDO, invalid payloads, invalid timestamps, oversized payloads, bad topics, and unregistered machines without crashing ingestion', async () => {
+  it('rejects REDO, COMPLETED, FAILED, invalid wound_length, invalid payloads, oversized payloads, bad topics, and unregistered machines without crashing ingestion', async () => {
     const machineId = await registerMachine('REJECT');
     const unknownMachineId = `T12-UNKNOWN-${randomUUID().slice(0, 8)}`;
     const warnSpy = vi.spyOn(ctx.app.log, 'warn');
@@ -162,20 +176,25 @@ describe('coil outcome ingestion and rollup views', () => {
       const invalidPayloads = [
         '{"outcome":"REDO"}',
         '{"outcome":"REDO","duration_sec":60}',
+        '{"outcome":"COMPLETED"}',
+        '{"outcome":"COMPLETED","duration_sec":148}',
         '{"outcome":"FAILED"}',
-        '{"outcome":"COMPLETED","duration_sec":-1}',
-        '{"outcome":"COMPLETED","duration_sec":12.5}',
-        '{"outcome":"COMPLETED","duration_sec":null}',
+        '{"outcome":"AUTO_FINISHED","duration_sec":-1}',
+        '{"outcome":"AUTO_FINISHED","duration_sec":12.5}',
+        '{"outcome":"AUTO_FINISHED","duration_sec":null}',
+        '{"outcome":"AUTO_FINISHED","wound_length":-1}',
+        '{"outcome":"AUTO_FINISHED","wound_length":null}',
+        '{"outcome":"AUTO_FINISHED","wound_length":"120"}',
         '{"outcome":"ABORTED","reason_code":""}',
         '{"outcome":"ABORTED","reason_code":"   "}',
-        '{"outcome":"COMPLETED","ts":"not-a-timestamp"}',
-        '{"outcome":"COMPLETED","ts":"2026-02-30T12:00:00Z"}',
-        '{"outcome":"COMPLETED","ts":"12345"}',
-        '{"outcome":"COMPLETED","ts":"11/19/2026"}',
-        '{"outcome":"COMPLETED","ts":1e20}',
-        '{"outcome":"COMPLETED","extra":"bad"}',
+        '{"outcome":"AUTO_FINISHED","ts":"not-a-timestamp"}',
+        '{"outcome":"AUTO_FINISHED","ts":"2026-02-30T12:00:00Z"}',
+        '{"outcome":"AUTO_FINISHED","ts":"12345"}',
+        '{"outcome":"AUTO_FINISHED","ts":"11/19/2026"}',
+        '{"outcome":"AUTO_FINISHED","ts":1e20}',
+        '{"outcome":"AUTO_FINISHED","extra":"bad"}',
         '{malformed-json',
-        JSON.stringify({ outcome: 'COMPLETED', reason_code: 'R'.repeat(1010) }),
+        JSON.stringify({ outcome: 'AUTO_FINISHED', reason_code: 'R'.repeat(1010) }),
       ];
 
       for (const payload of invalidPayloads) {
@@ -185,29 +204,33 @@ describe('coil outcome ingestion and rollup views', () => {
       // Invalid topic (leading dash on machineId) should not match or crash
       await ctx.mqtt.emit(
         'factory/winders/-invalid/coil',
-        JSON.stringify({ outcome: 'COMPLETED', duration_sec: 10 }),
+        JSON.stringify({ outcome: 'AUTO_FINISHED', duration_sec: 10 }),
       );
 
       // Valid payload for an unregistered machine is safely ignored
       await ctx.mqtt.emit(
         `factory/winders/${unknownMachineId}/coil`,
-        JSON.stringify({ outcome: 'COMPLETED', duration_sec: 30 }),
+        JSON.stringify({ outcome: 'AUTO_FINISHED', duration_sec: 30, wound_length: 25 }),
       );
 
       // Subsequent valid payload for the registered machine still succeeds
       await ctx.mqtt.emit(
         `factory/winders/${machineId}/coil`,
-        JSON.stringify({ outcome: 'COMPLETED', duration_sec: 77 }),
+        JSON.stringify({ outcome: 'AUTO_FINISHED', duration_sec: 77, wound_length: 64.5 }),
       );
 
       const registeredRows = await ctx.db.query<{
         outcome: string;
         duration_sec: number | null;
+        wound_length: number | null;
       }>(
-        'SELECT outcome, duration_sec FROM coil_outcomes WHERE machine_id = $1',
+        'SELECT outcome, duration_sec, wound_length FROM coil_outcomes WHERE machine_id = $1',
         [machineId],
       );
-      expect(registeredRows.rows).toEqual([{ outcome: 'COMPLETED', duration_sec: 77 }]);
+      expect(registeredRows.rows).toHaveLength(1);
+      expect(registeredRows.rows[0]?.outcome).toBe('AUTO_FINISHED');
+      expect(registeredRows.rows[0]?.duration_sec).toBe(77);
+      expect(registeredRows.rows[0]?.wound_length).toBeCloseTo(64.5, 5);
 
       const unknownRows = await ctx.db.query<{ id: string }>(
         'SELECT id FROM coil_outcomes WHERE machine_id = $1',
@@ -215,7 +238,7 @@ describe('coil outcome ingestion and rollup views', () => {
       );
       expect(unknownRows.rows).toHaveLength(0);
 
-      // All rejected messages produced warning logs (16 invalid payloads + 1 bad topic + 1 unknown machine)
+      // All rejected messages produced warning logs (21 invalid payloads + 1 bad topic + 1 unknown machine)
       expect(warnSpy).toHaveBeenCalledTimes(invalidPayloads.length + 2);
     } finally {
       warnSpy.mockRestore();
@@ -243,13 +266,21 @@ describe('coil outcome ingestion and rollup views', () => {
 
     interface RollupViewRow {
       time_window: 'TODAY' | 'WEEK' | 'MONTH' | 'ALL_TIME';
-      completed_count: number;
+      auto_finished_count: number;
       aborted_count: number;
+      fault_terminated_count: number;
       total_count: number;
+      total_wound_length: number;
     }
 
     const beforeRoomRes = await ctx.db.query<RollupViewRow>(
-      `SELECT time_window, completed_count, aborted_count, total_count
+      `SELECT
+         time_window,
+         auto_finished_count,
+         aborted_count,
+         fault_terminated_count,
+         total_count,
+         total_wound_length
        FROM coil_rollup_room`,
     );
     expect(beforeRoomRes.rows.map((r) => r.time_window)).toEqual([
@@ -281,15 +312,25 @@ describe('coil outcome ingestion and rollup views', () => {
       monthStart.getTime(),
     );
 
-    const machineASamples: Array<{ outcome: 'COMPLETED' | 'ABORTED'; ts: Date }> = [
-      { outcome: 'COMPLETED', ts: dayStart },
-      { outcome: 'ABORTED', ts: new Date(dayStart.getTime() + 60_000) },
-      { outcome: 'COMPLETED', ts: new Date(dayStart.getTime() - 1) },
-      { outcome: 'COMPLETED', ts: weekStart },
-      { outcome: 'ABORTED', ts: new Date(weekStart.getTime() - 1) },
-      { outcome: 'COMPLETED', ts: monthStart },
-      { outcome: 'ABORTED', ts: new Date(monthStart.getTime() - 1) },
-      { outcome: 'COMPLETED', ts: new Date(earliestBoundaryMs - 60 * 86400 * 1000) },
+    type OutcomeSample = {
+      outcome: 'AUTO_FINISHED' | 'ABORTED' | 'FAULT_TERMINATED';
+      wound_length: number | null;
+      ts: Date;
+    };
+
+    const machineASamples: OutcomeSample[] = [
+      { outcome: 'AUTO_FINISHED', wound_length: 100.5, ts: dayStart },
+      { outcome: 'ABORTED', wound_length: 25.0, ts: new Date(dayStart.getTime() + 60_000) },
+      { outcome: 'FAULT_TERMINATED', wound_length: 40.25, ts: new Date(dayStart.getTime() - 1) },
+      { outcome: 'AUTO_FINISHED', wound_length: 110.0, ts: weekStart },
+      { outcome: 'ABORTED', wound_length: null, ts: new Date(weekStart.getTime() - 1) },
+      { outcome: 'AUTO_FINISHED', wound_length: 120.0, ts: monthStart },
+      { outcome: 'FAULT_TERMINATED', wound_length: 35.5, ts: new Date(monthStart.getTime() - 1) },
+      {
+        outcome: 'AUTO_FINISHED',
+        wound_length: 90.0,
+        ts: new Date(earliestBoundaryMs - 60 * 86400 * 1000),
+      },
     ];
 
     for (const sample of machineASamples) {
@@ -298,14 +339,15 @@ describe('coil outcome ingestion and rollup views', () => {
         JSON.stringify({
           outcome: sample.outcome,
           duration_sec: 100,
+          ...(sample.wound_length !== null ? { wound_length: sample.wound_length } : {}),
           ts: sample.ts.toISOString(),
         }),
       );
     }
 
-    const machineCSamples: Array<{ outcome: 'COMPLETED' | 'ABORTED'; ts: Date }> = [
-      { outcome: 'COMPLETED', ts: nowTs },
-      { outcome: 'ABORTED', ts: nowTs },
+    const machineCSamples: OutcomeSample[] = [
+      { outcome: 'AUTO_FINISHED', wound_length: 75.5, ts: nowTs },
+      { outcome: 'FAULT_TERMINATED', wound_length: 15.25, ts: nowTs },
     ];
     for (const sample of machineCSamples) {
       await ctx.mqtt.emit(
@@ -313,22 +355,57 @@ describe('coil outcome ingestion and rollup views', () => {
         JSON.stringify({
           outcome: sample.outcome,
           duration_sec: 55,
+          ...(sample.wound_length !== null ? { wound_length: sample.wound_length } : {}),
         }),
       );
     }
 
-    // Machine B has 0 outcomes and must still return all 4 windows with 0 counts
+    // Machine B has 0 outcomes and must still return all 4 windows with 0 counts & 0 length
     const machineBRows = await ctx.db.query<RollupViewRow>(
-      `SELECT time_window, completed_count, aborted_count, total_count
+      `SELECT
+         time_window,
+         auto_finished_count,
+         aborted_count,
+         fault_terminated_count,
+         total_count,
+         total_wound_length
        FROM coil_rollup_machine
        WHERE machine_id = $1`,
       [machineB],
     );
     expect(machineBRows.rows).toEqual([
-      { time_window: 'TODAY', completed_count: 0, aborted_count: 0, total_count: 0 },
-      { time_window: 'WEEK', completed_count: 0, aborted_count: 0, total_count: 0 },
-      { time_window: 'MONTH', completed_count: 0, aborted_count: 0, total_count: 0 },
-      { time_window: 'ALL_TIME', completed_count: 0, aborted_count: 0, total_count: 0 },
+      {
+        time_window: 'TODAY',
+        auto_finished_count: 0,
+        aborted_count: 0,
+        fault_terminated_count: 0,
+        total_count: 0,
+        total_wound_length: 0,
+      },
+      {
+        time_window: 'WEEK',
+        auto_finished_count: 0,
+        aborted_count: 0,
+        fault_terminated_count: 0,
+        total_count: 0,
+        total_wound_length: 0,
+      },
+      {
+        time_window: 'MONTH',
+        auto_finished_count: 0,
+        aborted_count: 0,
+        fault_terminated_count: 0,
+        total_count: 0,
+        total_wound_length: 0,
+      },
+      {
+        time_window: 'ALL_TIME',
+        auto_finished_count: 0,
+        aborted_count: 0,
+        fault_terminated_count: 0,
+        total_count: 0,
+        total_wound_length: 0,
+      },
     ]);
 
     const windowStarts: Record<RollupViewRow['time_window'], Date | null> = {
@@ -338,69 +415,106 @@ describe('coil outcome ingestion and rollup views', () => {
       ALL_TIME: null,
     };
 
-    const countSamples = (
-      samples: Array<{ outcome: 'COMPLETED' | 'ABORTED'; ts: Date }>,
-      since: Date | null,
-    ) => {
+    const countSamples = (samples: OutcomeSample[], since: Date | null) => {
       const matching = since
         ? samples.filter((s) => s.ts.getTime() >= since.getTime())
         : samples;
-      const completed = matching.filter((s) => s.outcome === 'COMPLETED').length;
+      const autoFinished = matching.filter((s) => s.outcome === 'AUTO_FINISHED').length;
       const aborted = matching.filter((s) => s.outcome === 'ABORTED').length;
+      const faultTerminated = matching.filter((s) => s.outcome === 'FAULT_TERMINATED').length;
+      const woundLength = matching.reduce((sum, s) => sum + (s.wound_length ?? 0), 0);
       return {
-        completed_count: completed,
+        auto_finished_count: autoFinished,
         aborted_count: aborted,
-        total_count: completed + aborted,
+        fault_terminated_count: faultTerminated,
+        total_count: autoFinished + aborted + faultTerminated,
+        total_wound_length: woundLength,
       };
     };
 
     const machineARows = await ctx.db.query<RollupViewRow>(
-      `SELECT time_window, completed_count, aborted_count, total_count
+      `SELECT
+         time_window,
+         auto_finished_count,
+         aborted_count,
+         fault_terminated_count,
+         total_count,
+         total_wound_length
        FROM coil_rollup_machine
        WHERE machine_id = $1`,
       [machineA],
     );
     expect(machineARows.rows).toHaveLength(4);
     for (const row of machineARows.rows) {
-      expect(typeof row.completed_count).toBe('number');
+      expect(typeof row.auto_finished_count).toBe('number');
       expect(typeof row.aborted_count).toBe('number');
+      expect(typeof row.fault_terminated_count).toBe('number');
       expect(typeof row.total_count).toBe('number');
+      expect(typeof row.total_wound_length).toBe('number');
       const expected = countSamples(machineASamples, windowStarts[row.time_window]);
-      expect(row).toEqual({
+      expect({
         time_window: row.time_window,
-        ...expected,
+        auto_finished_count: row.auto_finished_count,
+        aborted_count: row.aborted_count,
+        fault_terminated_count: row.fault_terminated_count,
+        total_count: row.total_count,
+      }).toEqual({
+        time_window: row.time_window,
+        auto_finished_count: expected.auto_finished_count,
+        aborted_count: expected.aborted_count,
+        fault_terminated_count: expected.fault_terminated_count,
+        total_count: expected.total_count,
       });
+      expect(row.total_wound_length).toBeCloseTo(expected.total_wound_length, 5);
     }
 
-    // Verify ALL_TIME captures every sample while TODAY excludes pre-dayStart samples
     const machineAAllTime = machineARows.rows.find((r) => r.time_window === 'ALL_TIME');
     const machineAToday = machineARows.rows.find((r) => r.time_window === 'TODAY');
-    expect(machineAAllTime).toEqual({
+    expect(machineAAllTime).toMatchObject({
       time_window: 'ALL_TIME',
-      completed_count: 5,
-      aborted_count: 3,
+      auto_finished_count: 4,
+      aborted_count: 2,
+      fault_terminated_count: 2,
       total_count: 8,
     });
+    expect(machineAAllTime?.total_wound_length).toBeCloseTo(521.25, 5);
     expect(machineAToday!.total_count).toBeLessThan(machineAAllTime!.total_count);
 
     // Room rollup view deltas (after - before) match combined machineA + machineC counts
     const afterRoomRes = await ctx.db.query<RollupViewRow>(
-      `SELECT time_window, completed_count, aborted_count, total_count
+      `SELECT
+         time_window,
+         auto_finished_count,
+         aborted_count,
+         fault_terminated_count,
+         total_count,
+         total_wound_length
        FROM coil_rollup_room`,
     );
     const combinedSamples = [...machineASamples, ...machineCSamples];
     for (const afterRow of afterRoomRes.rows) {
       const beforeRow = beforeRoomByWindow.get(afterRow.time_window)!;
-      const delta = {
-        completed_count: afterRow.completed_count - beforeRow.completed_count,
+      const expected = countSamples(combinedSamples, windowStarts[afterRow.time_window]);
+      expect({
+        auto_finished_count: afterRow.auto_finished_count - beforeRow.auto_finished_count,
         aborted_count: afterRow.aborted_count - beforeRow.aborted_count,
+        fault_terminated_count:
+          afterRow.fault_terminated_count - beforeRow.fault_terminated_count,
         total_count: afterRow.total_count - beforeRow.total_count,
-      };
-      expect(delta).toEqual(countSamples(combinedSamples, windowStarts[afterRow.time_window]));
+      }).toEqual({
+        auto_finished_count: expected.auto_finished_count,
+        aborted_count: expected.aborted_count,
+        fault_terminated_count: expected.fault_terminated_count,
+        total_count: expected.total_count,
+      });
+      expect(afterRow.total_wound_length - beforeRow.total_wound_length).toBeCloseTo(
+        expected.total_wound_length,
+        5,
+      );
     }
   });
 
-  it('serves machine and room coil rollups over HTTP API with 404 for unknown machines and OpenAPI documentation', async () => {
+  it('serves machine and room ESP32 cycle rollups over HTTP API with 404 for unknown machines and OpenAPI documentation', async () => {
     const missingId = `T12-MISSING-${randomUUID().slice(0, 8)}`;
     const notFoundRes = await ctx.app.inject({
       method: 'GET',
@@ -429,19 +543,49 @@ describe('coil outcome ingestion and rollup views', () => {
     expect(zeroRes.json()).toEqual({
       machine_id: machineZero,
       rollups: [
-        { window: 'TODAY', completed_count: 0, aborted_count: 0, total_count: 0 },
-        { window: 'WEEK', completed_count: 0, aborted_count: 0, total_count: 0 },
-        { window: 'MONTH', completed_count: 0, aborted_count: 0, total_count: 0 },
-        { window: 'ALL_TIME', completed_count: 0, aborted_count: 0, total_count: 0 },
+        {
+          window: 'TODAY',
+          auto_finished_count: 0,
+          aborted_count: 0,
+          fault_terminated_count: 0,
+          total_count: 0,
+          total_wound_length: 0,
+        },
+        {
+          window: 'WEEK',
+          auto_finished_count: 0,
+          aborted_count: 0,
+          fault_terminated_count: 0,
+          total_count: 0,
+          total_wound_length: 0,
+        },
+        {
+          window: 'MONTH',
+          auto_finished_count: 0,
+          aborted_count: 0,
+          fault_terminated_count: 0,
+          total_count: 0,
+          total_wound_length: 0,
+        },
+        {
+          window: 'ALL_TIME',
+          auto_finished_count: 0,
+          aborted_count: 0,
+          fault_terminated_count: 0,
+          total_count: 0,
+          total_wound_length: 0,
+        },
       ],
     });
 
     interface RoomRollupResponse {
       rollups: Array<{
         window: 'TODAY' | 'WEEK' | 'MONTH' | 'ALL_TIME';
-        completed_count: number;
+        auto_finished_count: number;
         aborted_count: number;
+        fault_terminated_count: number;
         total_count: number;
+        total_wound_length: number;
       }>;
     }
 
@@ -472,19 +616,29 @@ describe('coil outcome ingestion and rollup views', () => {
 
     await ctx.mqtt.emit(
       `factory/winders/${machineActive}/coil`,
-      JSON.stringify({ outcome: 'COMPLETED', duration_sec: 120 }),
+      JSON.stringify({ outcome: 'AUTO_FINISHED', duration_sec: 120, wound_length: 100 }),
     );
     await ctx.mqtt.emit(
       `factory/winders/${machineActive}/coil`,
-      JSON.stringify({ outcome: 'COMPLETED', duration_sec: 115 }),
+      JSON.stringify({ outcome: 'AUTO_FINISHED', duration_sec: 115, wound_length: 105.5 }),
     );
     await ctx.mqtt.emit(
       `factory/winders/${machineActive}/coil`,
-      JSON.stringify({ outcome: 'ABORTED', reason_code: 'ERR_BOBBIN_JAM', duration_sec: 32 }),
+      JSON.stringify({
+        outcome: 'FAULT_TERMINATED',
+        reason_code: 'ERR_BOBBIN_JAM',
+        duration_sec: 32,
+        wound_length: 22.5,
+      }),
     );
     await ctx.mqtt.emit(
       `factory/winders/${machineActive}/coil`,
-      JSON.stringify({ outcome: 'ABORTED', duration_sec: 18, ts: ancientTs }),
+      JSON.stringify({
+        outcome: 'ABORTED',
+        duration_sec: 18,
+        wound_length: 10,
+        ts: ancientTs,
+      }),
     );
 
     const activeRes = await ctx.app.inject({
@@ -495,10 +649,38 @@ describe('coil outcome ingestion and rollup views', () => {
     expect(activeRes.json()).toEqual({
       machine_id: machineActive,
       rollups: [
-        { window: 'TODAY', completed_count: 2, aborted_count: 1, total_count: 3 },
-        { window: 'WEEK', completed_count: 2, aborted_count: 1, total_count: 3 },
-        { window: 'MONTH', completed_count: 2, aborted_count: 1, total_count: 3 },
-        { window: 'ALL_TIME', completed_count: 2, aborted_count: 2, total_count: 4 },
+        {
+          window: 'TODAY',
+          auto_finished_count: 2,
+          aborted_count: 0,
+          fault_terminated_count: 1,
+          total_count: 3,
+          total_wound_length: 228,
+        },
+        {
+          window: 'WEEK',
+          auto_finished_count: 2,
+          aborted_count: 0,
+          fault_terminated_count: 1,
+          total_count: 3,
+          total_wound_length: 228,
+        },
+        {
+          window: 'MONTH',
+          auto_finished_count: 2,
+          aborted_count: 0,
+          fault_terminated_count: 1,
+          total_count: 3,
+          total_wound_length: 228,
+        },
+        {
+          window: 'ALL_TIME',
+          auto_finished_count: 2,
+          aborted_count: 1,
+          fault_terminated_count: 1,
+          total_count: 4,
+          total_wound_length: 238,
+        },
       ],
     });
 
@@ -512,16 +694,48 @@ describe('coil outcome ingestion and rollup views', () => {
       const prev = beforeByWindow.get(row.window)!;
       return {
         window: row.window,
-        completed_count: row.completed_count - prev.completed_count,
+        auto_finished_count: row.auto_finished_count - prev.auto_finished_count,
         aborted_count: row.aborted_count - prev.aborted_count,
+        fault_terminated_count: row.fault_terminated_count - prev.fault_terminated_count,
         total_count: row.total_count - prev.total_count,
+        total_wound_length: Number(
+          (row.total_wound_length - prev.total_wound_length).toFixed(4),
+        ),
       };
     });
     expect(deltas).toEqual([
-      { window: 'TODAY', completed_count: 2, aborted_count: 1, total_count: 3 },
-      { window: 'WEEK', completed_count: 2, aborted_count: 1, total_count: 3 },
-      { window: 'MONTH', completed_count: 2, aborted_count: 1, total_count: 3 },
-      { window: 'ALL_TIME', completed_count: 2, aborted_count: 2, total_count: 4 },
+      {
+        window: 'TODAY',
+        auto_finished_count: 2,
+        aborted_count: 0,
+        fault_terminated_count: 1,
+        total_count: 3,
+        total_wound_length: 228,
+      },
+      {
+        window: 'WEEK',
+        auto_finished_count: 2,
+        aborted_count: 0,
+        fault_terminated_count: 1,
+        total_count: 3,
+        total_wound_length: 228,
+      },
+      {
+        window: 'MONTH',
+        auto_finished_count: 2,
+        aborted_count: 0,
+        fault_terminated_count: 1,
+        total_count: 3,
+        total_wound_length: 228,
+      },
+      {
+        window: 'ALL_TIME',
+        auto_finished_count: 2,
+        aborted_count: 1,
+        fault_terminated_count: 1,
+        total_count: 4,
+        total_wound_length: 238,
+      },
     ]);
 
     const openApiRes = await ctx.app.inject({
@@ -529,6 +743,12 @@ describe('coil outcome ingestion and rollup views', () => {
       url: '/docs/json',
     });
     expect(openApiRes.statusCode).toBe(200);
+    const openApiText = openApiRes.body;
+    expect(openApiText).toContain('auto_finished_count');
+    expect(openApiText).toContain('fault_terminated_count');
+    expect(openApiText).toContain('total_wound_length');
+    expect(openApiText).not.toContain('completed_count');
+
     const spec = openApiRes.json<{
       paths: Record<
         string,

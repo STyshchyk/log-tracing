@@ -31,7 +31,7 @@ factory/winders/{machineId}/{channel}
 | `{machineId}` | Regex `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (1–64 chars, alphanumeric start, no spaces, slashes, or MQTT wildcards `+` / `#`) | `W-01`, `W-02`, `W_12` |
 | `{channel}` | One of `status`, `events`, `coil` | `status`, `events`, `coil` |
 
-The backend subscribes to `factory/winders/+/+`.
+The backend subscribes per channel to `factory/winders/+/status`, `factory/winders/+/events`, and `factory/winders/+/coil`.
 
 ---
 
@@ -173,7 +173,7 @@ Periodic heartbeat:
 
 ### 3.3 `factory/winders/{machineId}/coil`
 
-Automatic winding cycle completion and abort telemetry persisted in `coil_outcomes`.
+ESP32 internal winding cycle telemetry (automatic stop, explicit abort, unexpected fault termination, elapsed duration, and total wound fiber length) persisted in `coil_outcomes`.
 
 - **MQTT Retain Flag:** **`false`**
 
@@ -181,29 +181,36 @@ Automatic winding cycle completion and abort telemetry persisted in `coil_outcom
 
 | Field | Type | Required | Validation / Semantics |
 | :--- | :--- | :--- | :--- |
-| `outcome` | `string` | **Yes** | Enum: `"COMPLETED"` or `"ABORTED"`. |
+| `outcome` | `string` | **Yes** | Enum: `"AUTO_FINISHED"`, `"ABORTED"`, or `"FAULT_TERMINATED"`. |
 | `reason_code` | `string \| null` | No | Optional non-empty string (recommended: matching `error_code` from `spec/error_codes.json` such as `"ERR_FIBER_SNAP"` or `"OPERATOR_ABORT"`), or `null`. |
 | `duration_sec` | `number` | No | Non-negative **integer** (`>= 0`, no decimals) representing elapsed cycle seconds. |
+| `wound_length` | `number` | No | Optional finite non-negative number (`>= 0`) reporting total wound fiber length from cycle start to stop (firmware-configured linear unit, default meters — confirm physical unit label with firmware team before flashing). |
 | `ts` | `string \| number` | No | Optional non-empty timestamp string or finite non-negative number. |
 
-#### Phase 1 `REDO` Exclusion Rule
+#### External QR / CRM Exclusion Rule
 
-- **`"REDO"` is explicitly excluded and MUST NOT be published in Phase 1.**
-- `coilPayloadSchema` rejects `"REDO"` and any value other than `"COMPLETED"` or `"ABORTED"`.
-- Rationale: the ESP32 winding controller only observes `start`, `stop`, `pause`, and `abort` lifecycle states and cannot reliably detect visual-defect coil rework without adding extra shop-floor scans.
+- **CRM/QR outcomes (`"REDO"`, `"COMPLETED"`, `"FAILED"`) are explicitly excluded and MUST NOT be published on `coil`.**
+- `coilPayloadSchema` rejects `"REDO"`, `"COMPLETED"`, `"FAILED"`, and any value other than `"AUTO_FINISHED"`, `"ABORTED"`, or `"FAULT_TERMINATED"`.
+- Rationale: we do not have access to the third-party Android QR/CRM system; this topic captures strictly what the ESP32 winding controller observes internally (`start`, automatic program finish, explicit abort, unexpected fault/crash termination, duration, and wound fiber length).
 
 #### Examples
 
-Normal completed coil:
+Normal automatic program finish (`AUTO_FINISHED`):
 
 ```json
-{"outcome":"COMPLETED","duration_sec":148}
+{"outcome":"AUTO_FINISHED","duration_sec":148,"wound_length":124.5}
 ```
 
-Aborted coil due to fiber snap:
+Explicit operator abort (`ABORTED`):
 
 ```json
-{"outcome":"ABORTED","reason_code":"ERR_FIBER_SNAP","duration_sec":43}
+{"outcome":"ABORTED","reason_code":"OPERATOR_ABORT","duration_sec":43,"wound_length":38.2}
+```
+
+Unexpected fault termination (`FAULT_TERMINATED`):
+
+```json
+{"outcome":"FAULT_TERMINATED","reason_code":"ERR_FIBER_SNAP","duration_sec":61,"wound_length":52.0}
 ```
 
 ---

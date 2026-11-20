@@ -49,6 +49,20 @@ describe('Department Heads /fleet SSR PWA and web manifest', () => {
     expect(html).toContain('id="count-error"');
     expect(html).toContain('data-coil-window="TODAY"');
     expect(html).toContain('data-coil-window="ALL_TIME"');
+    expect(html).toContain('Winding Cycles (ESP32)');
+    expect(html).toContain('Auto-Finished');
+    expect(html).toContain('Aborted');
+    expect(html).toContain('Fault-Stopped');
+    expect(html).toContain('Wound Fiber');
+    expect(html).toContain('id="coil-auto-finished"');
+    expect(html).toContain('id="coil-aborted"');
+    expect(html).toContain('id="coil-fault-terminated"');
+    expect(html).toContain('id="coil-wound-length"');
+    expect(html).toContain('Winding Cycle Telemetry (ESP32)');
+    expect(html).not.toContain('Coil Outcomes');
+    expect(html).not.toContain('Coil Production Rollups');
+    expect(html).not.toContain('>Completed<');
+    expect(html).not.toContain('>Completion<');
 
     // Accessible 3-tab structure with focusgroup and hidden="until-found"
     expect(html).toContain('focusgroup="tablist nomemory"');

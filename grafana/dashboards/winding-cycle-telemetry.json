@@ -1,0 +1,799 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "ESP32 internal winding cycle telemetry: AUTO_FINISHED, ABORTED, FAULT_TERMINATED outcomes, total wound fiber length, cycle durations, and Glossary / bug-report correlations.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "ESP32 Firmware Health",
+      "type": "link",
+      "url": "/d/esp32-firmware-health"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Fleet PWA",
+      "type": "link",
+      "url": "${app_url}/fleet"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Summary of ESP32 internal cycle stop modes and total wound fiber length.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "auto_finished"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Auto-Finished"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "aborted"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Aborted"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fault_terminated"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Fault-Terminated"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_cycles"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Total Cycles"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_wound_length"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Total Wound Fiber"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "/.*/",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  COUNT(*) FILTER (WHERE co.outcome = 'AUTO_FINISHED')::integer AS auto_finished,\n  COUNT(*) FILTER (WHERE co.outcome = 'ABORTED')::integer AS aborted,\n  COUNT(*) FILTER (WHERE co.outcome = 'FAULT_TERMINATED')::integer AS fault_terminated,\n  COUNT(*)::integer AS total_cycles,\n  COALESCE(SUM(co.wound_length), 0)::double precision AS total_wound_length\nFROM coil_outcomes co\nINNER JOIN machines m ON m.id = co.machine_id\nWHERE $__timeFilter(co.created_at)\n  AND m.zone IN ($zone)\n  AND co.machine_id IN ($machine)",
+          "refId": "A"
+        }
+      ],
+      "title": "ESP32 Cycle Stop Breakdown",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Time-series counts of AUTO_FINISHED, ABORTED, and FAULT_TERMINATED winding cycles.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 75,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "AUTO_FINISHED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ABORTED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "FAULT_TERMINATED"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(co.created_at, $__interval),\n  co.outcome AS metric,\n  COUNT(*)::integer AS cycles\nFROM coil_outcomes co\nINNER JOIN machines m ON m.id = co.machine_id\nWHERE $__timeFilter(co.created_at)\n  AND m.zone IN ($zone)\n  AND co.machine_id IN ($machine)\nGROUP BY 1, 2\nORDER BY 1 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "ESP32 Cycle Outcomes Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Cumulative wound fiber length emitted by ESP32 controllers per time bucket.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": false
+          },
+          "decimals": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(co.created_at, $__interval),\n  co.machine_id AS metric,\n  COALESCE(SUM(co.wound_length), 0)::double precision AS wound_length\nFROM coil_outcomes co\nINNER JOIN machines m ON m.id = co.machine_id\nWHERE $__timeFilter(co.created_at)\n  AND m.zone IN ($zone)\n  AND co.machine_id IN ($machine)\n  AND co.wound_length IS NOT NULL\nGROUP BY 1, 2\nORDER BY 1 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Wound Fiber Length Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Total wound fiber length aggregated per machine with Worker Portal deep-link.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "links": [
+            {
+              "targetBlank": true,
+              "title": "Open Worker Portal",
+              "url": "${app_url}/m/${__data.fields.machine_id}"
+            }
+          ],
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 0,
+        "y": 13
+      },
+      "id": 4,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": true
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  co.machine_id,\n  COALESCE(SUM(co.wound_length), 0)::double precision AS total_wound_length\nFROM coil_outcomes co\nINNER JOIN machines m ON m.id = co.machine_id\nWHERE $__timeFilter(co.created_at)\n  AND m.zone IN ($zone)\n  AND co.machine_id IN ($machine)\nGROUP BY co.machine_id\nORDER BY total_wound_length DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Wound Fiber Length by Machine",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Winding cycle duration statistics (mean, P50 median, P95) in seconds.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 10,
+        "y": 13
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(co.created_at, $__interval),\n  AVG(co.duration_sec)::double precision AS avg_sec,\n  percentile_cont(0.5) WITHIN GROUP (ORDER BY co.duration_sec)::double precision AS p50_sec,\n  percentile_cont(0.95) WITHIN GROUP (ORDER BY co.duration_sec)::double precision AS p95_sec\nFROM coil_outcomes co\nINNER JOIN machines m ON m.id = co.machine_id\nWHERE $__timeFilter(co.created_at)\n  AND m.zone IN ($zone)\n  AND co.machine_id IN ($machine)\n  AND co.duration_sec IS NOT NULL\nGROUP BY 1\nORDER BY 1 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Cycle Duration Trend — AVG / P50 / P95 (Seconds)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Aborted and fault-terminated cycles grouped by ESP32 reason_code with Glossary deep-links.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reason_code"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Glossary Fix Steps",
+                    "url": "${app_url}/m/${__data.fields.machine_id}/glossary?q=${__data.fields.reason_code}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Worker Portal",
+                    "url": "${app_url}/m/${__data.fields.machine_id}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "id": 6,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": ["sum"],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  COALESCE(co.reason_code, 'UNSPECIFIED') AS reason_code,\n  co.outcome,\n  COALESCE(eg.title, 'No glossary entry') AS glossary_title,\n  MIN(co.machine_id) AS machine_id,\n  COUNT(*)::integer AS cycles,\n  ROUND(AVG(co.duration_sec)::numeric, 1)::double precision AS avg_duration_sec,\n  COALESCE(SUM(co.wound_length), 0)::double precision AS total_wound_length\nFROM coil_outcomes co\nINNER JOIN machines m ON m.id = co.machine_id\nLEFT JOIN error_glossary eg ON eg.error_code = co.reason_code\nWHERE $__timeFilter(co.created_at)\n  AND m.zone IN ($zone)\n  AND co.machine_id IN ($machine)\n  AND co.outcome IN ('ABORTED', 'FAULT_TERMINATED')\nGROUP BY 1, 2, 3\nORDER BY cycles DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Abort & Fault-Termination Reason Breakdown",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Shop-floor operator bug reports (quick tag and text note) correlated by time and machine.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Worker Portal",
+                    "url": "${app_url}/m/${__data.fields.machine_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_code"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Glossary Fix Steps",
+                    "url": "${app_url}/m/${__data.fields.machine_id}/glossary?q=${__data.fields.error_code}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": ["sum"],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  br.created_at AS time,\n  br.id AS report_id,\n  br.machine_id,\n  m.zone,\n  br.tag,\n  br.error_code,\n  eg.title AS glossary_title,\n  br.worker_note,\n  br.status\nFROM bug_reports br\nINNER JOIN machines m ON m.id = br.machine_id\nLEFT JOIN error_glossary eg ON eg.error_code = br.error_code\nWHERE $__timeFilter(br.created_at)\n  AND m.zone IN ($zone)\n  AND br.machine_id IN ($machine)\nORDER BY br.created_at DESC, br.id DESC\nLIMIT 100",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Operator Bug Reports Correlation",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 40,
+  "tags": ["esp32", "engineering", "cycles"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": {
+          "type": "postgres",
+          "uid": "telemetry-postgres"
+        },
+        "definition": "SELECT DISTINCT zone FROM machines ORDER BY zone",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Floor Zone",
+        "multi": true,
+        "name": "zone",
+        "options": [],
+        "query": "SELECT DISTINCT zone FROM machines ORDER BY zone",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": {
+          "type": "postgres",
+          "uid": "telemetry-postgres"
+        },
+        "definition": "SELECT id FROM machines WHERE zone IN ($zone) ORDER BY id",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Machine",
+        "multi": true,
+        "name": "machine",
+        "options": [],
+        "query": "SELECT id FROM machines WHERE zone IN ($zone) ORDER BY id",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "http://localhost:3000",
+          "value": "http://localhost:3000"
+        },
+        "hide": 0,
+        "label": "Portal Base URL",
+        "name": "app_url",
+        "options": [
+          {
+            "selected": true,
+            "text": "http://localhost:3000",
+            "value": "http://localhost:3000"
+          }
+        ],
+        "query": "http://localhost:3000",
+        "skipUrlSync": false,
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Winding Cycle Telemetry & Reliability",
+  "uid": "winding-cycle-telemetry",
+  "version": 1,
+  "weekStart": ""
+}

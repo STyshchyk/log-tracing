@@ -54,16 +54,25 @@ export const machineRecordResponseSchema = {
 } as const;
 
 /**
- * Shared OpenAPI/JSON schema for coil outcome rollup buckets.
+ * Shared OpenAPI/JSON schema for ESP32 winding cycle telemetry rollup buckets.
  */
 export const coilRollupBucketResponseSchema = {
   type: 'object',
-  required: ['window', 'completed_count', 'aborted_count', 'total_count'],
+  required: [
+    'window',
+    'auto_finished_count',
+    'aborted_count',
+    'fault_terminated_count',
+    'total_count',
+    'total_wound_length',
+  ],
   properties: {
     window: { type: 'string', enum: ['TODAY', 'WEEK', 'MONTH', 'ALL_TIME'] },
-    completed_count: { type: 'integer', minimum: 0 },
+    auto_finished_count: { type: 'integer', minimum: 0 },
     aborted_count: { type: 'integer', minimum: 0 },
+    fault_terminated_count: { type: 'integer', minimum: 0 },
     total_count: { type: 'integer', minimum: 0 },
+    total_wound_length: { type: 'number', minimum: 0 },
   },
 } as const;
 

@@ -1,0 +1,637 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Engineering diagnostics for ESP32 Pico winding controllers: esp_reset_reason(), Wi-Fi RSSI, free heap memory, subsystem timeouts, and Glossary deep-links.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Winding Cycle Telemetry",
+      "type": "link",
+      "url": "/d/winding-cycle-telemetry"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": false,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Fleet PWA",
+      "type": "link",
+      "url": "${app_url}/fleet"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Counts of ESP32 boot and crash events grouped by esp_reset_reason().",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "barRadius": 0.1,
+        "barWidth": 0.7,
+        "colorByField": "reset_reason",
+        "fullHighlight": false,
+        "groupWidth": 0.7,
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "orientation": "horizontal",
+        "showValue": "always",
+        "stacking": "none",
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "xField": "reset_reason",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT te.payload_json->>'reset_reason' AS reset_reason, COUNT(*)::integer AS events\nFROM telemetry_events te\nINNER JOIN machines m ON m.id = te.machine_id\nWHERE $__timeFilter(te.time)\n  AND m.zone IN ($zone)\n  AND te.machine_id IN ($machine)\n  AND te.payload_json->>'reset_reason' IS NOT NULL\nGROUP BY 1\nORDER BY events DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Crash & Boot Reset Reasons (esp_reset_reason())",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Time-series trend of CRASH_RESET, brownout, and watchdog reset events.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 75,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(te.time, $__interval),\n  COALESCE(te.payload_json->>'reset_reason', te.event_type) AS metric,\n  COUNT(*)::integer AS resets\nFROM telemetry_events te\nINNER JOIN machines m ON m.id = te.machine_id\nWHERE $__timeFilter(te.time)\n  AND m.zone IN ($zone)\n  AND te.machine_id IN ($machine)\n  AND (te.event_type = 'CRASH_RESET' OR te.error_code IN ('ERR_BROWNOUT_RESET', 'ERR_WATCHDOG_RESET'))\nGROUP BY 1, 2\nORDER BY 1 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Abnormal Crash Resets Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "ESP32 Wi-Fi station RSSI (dBm). Values below -80 dBm indicate high packet-loss risk.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": true,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": -80
+              },
+              {
+                "color": "green",
+                "value": -70
+              }
+            ]
+          },
+          "unit": "dBm"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull", "min", "mean"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "asc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(te.time, $__interval),\n  te.machine_id AS metric,\n  AVG((te.payload_json->>'rssi')::double precision) AS rssi_dbm\nFROM telemetry_events te\nINNER JOIN machines m ON m.id = te.machine_id\nWHERE $__timeFilter(te.time)\n  AND m.zone IN ($zone)\n  AND te.machine_id IN ($machine)\n  AND te.payload_json ? 'rssi'\n  AND (te.payload_json->>'rssi') ~ '^-?[0-9]+(\\.[0-9]+)?$'\nGROUP BY 1, 2\nORDER BY 1 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Wi-Fi Signal Strength (RSSI dBm)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Free heap and minimum recorded heap watermark (details.min_free_heap) in bytes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "auto",
+            "spanNulls": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65536
+              },
+              {
+                "color": "green",
+                "value": 100000
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull", "min"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "asc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(te.time, $__interval),\n  te.machine_id AS metric,\n  AVG((te.payload_json->>'free_heap')::bigint)::double precision AS free_heap_bytes\nFROM telemetry_events te\nINNER JOIN machines m ON m.id = te.machine_id\nWHERE $__timeFilter(te.time)\n  AND m.zone IN ($zone)\n  AND te.machine_id IN ($machine)\n  AND te.payload_json ? 'free_heap'\n  AND (te.payload_json->>'free_heap') ~ '^[0-9]+$'\nGROUP BY 1, 2\nORDER BY 1 ASC",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(te.time, $__interval),\n  te.machine_id || ' (min)' AS metric,\n  MIN((te.payload_json->'details'->>'min_free_heap')::bigint)::double precision AS min_free_heap_bytes\nFROM telemetry_events te\nINNER JOIN machines m ON m.id = te.machine_id\nWHERE $__timeFilter(te.time)\n  AND m.zone IN ($zone)\n  AND te.machine_id IN ($machine)\n  AND (te.payload_json->'details'->>'min_free_heap') ~ '^[0-9]+$'\nGROUP BY 1, 2\nORDER BY 1 ASC",
+          "refId": "B"
+        }
+      ],
+      "title": "Free Heap & Min Free Heap (Bytes)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Most frequent fault codes and subsystem timeouts with deep-links to Worker Portal Glossary.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_code"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Glossary Fix Steps",
+                    "url": "${app_url}/m/${__data.fields.machine_id}/glossary?q=${__data.fields.error_code}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Worker Portal",
+                    "url": "${app_url}/m/${__data.fields.machine_id}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 0,
+        "y": 16
+      },
+      "id": 5,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": ["sum"],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  COALESCE(te.error_code, te.event_type) AS error_code,\n  COALESCE(eg.title, te.event_type) AS fault_title,\n  COALESCE(te.payload_json->>'subsystem', 'unspecified') AS subsystem,\n  MIN(te.machine_id) AS machine_id,\n  COUNT(*)::integer AS occurrences\nFROM telemetry_events te\nINNER JOIN machines m ON m.id = te.machine_id\nLEFT JOIN error_glossary eg ON eg.error_code = te.error_code\nWHERE $__timeFilter(te.time)\n  AND m.zone IN ($zone)\n  AND te.machine_id IN ($machine)\n  AND (te.error_code IS NOT NULL OR te.event_type IN ('ERROR', 'FAULT', 'SUBSYSTEM_TIMEOUT', 'CRASH_RESET'))\nGROUP BY 1, 2, 3\nORDER BY occurrences DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Fault & Subsystem Timeout Frequency",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "telemetry-postgres"
+      },
+      "description": "Recent fault and crash events joined with error_glossary; click machine_id or error_code to open Worker Portal / Glossary.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Worker Portal",
+                    "url": "${app_url}/m/${__data.fields.machine_id}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_code"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Open Glossary Fix Steps",
+                    "url": "${app_url}/m/${__data.fields.machine_id}/glossary?q=${__data.fields.error_code}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 10,
+        "y": 16
+      },
+      "id": 6,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": ["sum"],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "telemetry-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  te.time,\n  te.machine_id,\n  m.zone,\n  te.event_type,\n  te.error_code,\n  eg.title AS glossary_title,\n  te.payload_json->>'reset_reason' AS reset_reason,\n  te.payload_json->>'subsystem' AS subsystem,\n  CASE\n    WHEN (te.payload_json->>'rssi') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (te.payload_json->>'rssi')::double precision\n  END AS rssi_dbm,\n  CASE\n    WHEN (te.payload_json->>'free_heap') ~ '^[0-9]+$' THEN (te.payload_json->>'free_heap')::bigint\n  END AS free_heap_bytes,\n  te.payload_json->>'message' AS message\nFROM telemetry_events te\nINNER JOIN machines m ON m.id = te.machine_id\nLEFT JOIN error_glossary eg ON eg.error_code = te.error_code\nWHERE $__timeFilter(te.time)\n  AND m.zone IN ($zone)\n  AND te.machine_id IN ($machine)\n  AND (te.error_code IS NOT NULL OR te.event_type IN ('ERROR', 'FAULT', 'SUBSYSTEM_TIMEOUT', 'CRASH_RESET'))\nORDER BY te.time DESC\nLIMIT 100",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Fault Events & Crash Forensics",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 40,
+  "tags": ["esp32", "engineering", "diagnostics"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": {
+          "type": "postgres",
+          "uid": "telemetry-postgres"
+        },
+        "definition": "SELECT DISTINCT zone FROM machines ORDER BY zone",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Floor Zone",
+        "multi": true,
+        "name": "zone",
+        "options": [],
+        "query": "SELECT DISTINCT zone FROM machines ORDER BY zone",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": {
+          "type": "postgres",
+          "uid": "telemetry-postgres"
+        },
+        "definition": "SELECT id FROM machines WHERE zone IN ($zone) ORDER BY id",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Machine",
+        "multi": true,
+        "name": "machine",
+        "options": [],
+        "query": "SELECT id FROM machines WHERE zone IN ($zone) ORDER BY id",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "http://localhost:3000",
+          "value": "http://localhost:3000"
+        },
+        "hide": 0,
+        "label": "Portal Base URL",
+        "name": "app_url",
+        "options": [
+          {
+            "selected": true,
+            "text": "http://localhost:3000",
+            "value": "http://localhost:3000"
+          }
+        ],
+        "query": "http://localhost:3000",
+        "skipUrlSync": false,
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "ESP32 Firmware & Hardware Diagnostics",
+  "uid": "esp32-firmware-health",
+  "version": 1,
+  "weekStart": ""
+}

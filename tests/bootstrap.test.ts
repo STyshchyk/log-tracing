@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
+import { ensureSchema } from '../src/db/pool.js';
 import { createInMemoryMqttTransport } from '../src/mqtt/transport.js';
 import { createTestApp, type TestAppContext } from './helpers/test-app.js';
 
@@ -61,6 +62,18 @@ describe('bootstrap seam (Fastify + real PostgreSQL/TimescaleDB)', () => {
     );
     expect(photoColResult.rows[0]?.is_nullable).toBe('YES');
 
+    const woundLengthColResult = await ctx.db.query<{ is_nullable: string; data_type: string }>(
+      `SELECT is_nullable, data_type
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'coil_outcomes'
+         AND column_name = 'wound_length'`,
+    );
+    expect(woundLengthColResult.rows[0]).toEqual({
+      is_nullable: 'YES',
+      data_type: 'double precision',
+    });
+
     await ctx.db.query(
       `INSERT INTO machines (id, display_name, zone, grid_row, grid_col, current_state)
        VALUES ('TEST-W-99', 'Test Winder', 'NORTH_LEFT', 1, 1, 'IDLE')
@@ -91,10 +104,52 @@ describe('bootstrap seam (Fastify + real PostgreSQL/TimescaleDB)', () => {
 
       await expect(
         ctx.db.query(
+          `INSERT INTO coil_outcomes (machine_id, outcome)
+           VALUES ('TEST-W-99', 'COMPLETED')`,
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        ctx.db.query(
+          `INSERT INTO coil_outcomes (machine_id, outcome, wound_length)
+           VALUES ('TEST-W-99', 'AUTO_FINISHED', -1)`,
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        ctx.db.query(
+          `INSERT INTO coil_outcomes (machine_id, outcome, wound_length)
+           VALUES
+             ('TEST-W-99', 'AUTO_FINISHED', 120.5),
+             ('TEST-W-99', 'ABORTED', NULL),
+             ('TEST-W-99', 'FAULT_TERMINATED', 42.25)`,
+        ),
+      ).resolves.toBeDefined();
+
+      await expect(
+        ctx.db.query(
           `INSERT INTO bug_reports (machine_id, tag)
            VALUES ('TEST-W-99', 'Invalid Tag')`,
         ),
       ).rejects.toThrow();
+
+      // Re-running ensureSchema is idempotent and preserves Phase 3 constraints & views
+      await expect(ensureSchema(ctx.db)).resolves.toBeUndefined();
+      const viewColsRes = await ctx.db.query<{ column_name: string }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'coil_rollup_room'
+         ORDER BY ordinal_position`,
+      );
+      expect(viewColsRes.rows.map((r) => r.column_name)).toEqual([
+        'time_window',
+        'auto_finished_count',
+        'aborted_count',
+        'fault_terminated_count',
+        'total_count',
+        'total_wound_length',
+      ]);
     } finally {
       await ctx.db.query(`DELETE FROM machines WHERE id = 'TEST-W-99'`);
     }

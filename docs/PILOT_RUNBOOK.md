@@ -175,26 +175,30 @@ curl -s "http://127.0.0.1:3000/api/machines/W-01/events?limit=20&errorsOnly=fals
 curl -s "http://127.0.0.1:3000/api/machines/W-01/events?limit=5&errorsOnly=true"
 ```
 
-### 3.3 `coil` Outcomes (`COMPLETED`, `ABORTED`, and `REDO` Rejection)
+### 3.3 ESP32 `coil` Outcomes (`AUTO_FINISHED`, `ABORTED`, `FAULT_TERMINATED`, and CRM Status Rejection)
 
 ```bash
 # Baseline coil counts before simulation
 curl -s http://127.0.0.1:3000/api/machines/W-01/coils/rollups
 
-# 1. Valid COMPLETED cycle
-docker compose exec -T mosquitto mosquitto_pub -h 127.0.0.1 -t "factory/winders/W-01/coil" -q 1 -m '{"outcome":"COMPLETED","duration_sec":148}'
+# 1. Valid AUTO_FINISHED cycle with wound_length
+docker compose exec -T mosquitto mosquitto_pub -h 127.0.0.1 -t "factory/winders/W-01/coil" -q 1 -m '{"outcome":"AUTO_FINISHED","duration_sec":148,"wound_length":124.5}'
 
 # 2. Valid ABORTED cycle
-docker compose exec -T mosquitto mosquitto_pub -h 127.0.0.1 -t "factory/winders/W-01/coil" -q 1 -m '{"outcome":"ABORTED","reason_code":"ERR_FIBER_SNAP","duration_sec":43}'
+docker compose exec -T mosquitto mosquitto_pub -h 127.0.0.1 -t "factory/winders/W-01/coil" -q 1 -m '{"outcome":"ABORTED","reason_code":"OPERATOR_ABORT","duration_sec":43,"wound_length":38.2}'
 
-# 3. Invalid REDO outcome -> MUST be rejected by contract & never increment rollups
+# 3. Valid FAULT_TERMINATED cycle
+docker compose exec -T mosquitto mosquitto_pub -h 127.0.0.1 -t "factory/winders/W-01/coil" -q 1 -m '{"outcome":"FAULT_TERMINATED","reason_code":"ERR_FIBER_SNAP","duration_sec":61,"wound_length":52.0}'
+
+# 4. Invalid CRM/QR outcomes (REDO / COMPLETED) -> MUST be rejected by contract & never increment rollups
 docker compose exec -T mosquitto mosquitto_pub -h 127.0.0.1 -t "factory/winders/W-01/coil" -q 1 -m '{"outcome":"REDO","duration_sec":60}'
+docker compose exec -T mosquitto mosquitto_pub -h 127.0.0.1 -t "factory/winders/W-01/coil" -q 1 -m '{"outcome":"COMPLETED","duration_sec":148}'
 
-# Verify COMPLETED (+1), ABORTED (+1), and REDO ignored (total_count = +2)
+# Verify AUTO_FINISHED (+1), ABORTED (+1), FAULT_TERMINATED (+1), total_wound_length (+214.7), and REDO/COMPLETED ignored (total_count = +3)
 curl -s http://127.0.0.1:3000/api/machines/W-01/coils/rollups
 ```
 
-Check `docker compose logs --tail=20 app` — the rejected `REDO` payload logs a validation warning without crashing the MQTT subscriber loop.
+Check `docker compose logs --tail=20 app` — the rejected `REDO` and `COMPLETED` payloads log validation warnings without crashing the MQTT subscriber loop.
 
 ### 3.4 Simulate LWT `OFFLINE` on Ungraceful Disconnect
 
@@ -297,6 +301,6 @@ curl -s http://127.0.0.1:3000/api/machines/W-01
 ## 6. Firmware Handoff Reference
 
 Hand these three repository artifacts to the external ESP32 developer when flashing `W-01` and `W-02`:
-- `spec/MQTT_TOPICS.md` — topic structure, retained `status`, LWT `{"state":"OFFLINE"}`, `< 1024`-byte payload cap, and `coil` (`COMPLETED` / `ABORTED`) contract.
+- `spec/MQTT_TOPICS.md` — topic structure, retained `status`, LWT `{"state":"OFFLINE"}`, `< 1024`-byte payload cap, and ESP32 `coil` (`AUTO_FINISHED` / `ABORTED` / `FAULT_TERMINATED` + `wound_length`) contract.
 - `spec/ESP32_INTEGRATION.md` — non-blocking FreeRTOS queue, Core 0 publisher task, LittleFS/RAM ring-buffer, and `esp_reset_reason()` startup diagnostics.
 - `spec/error_codes.json` — canonical `error_code` enum definitions shared with the Worker Portal Glossary.

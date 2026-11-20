@@ -115,7 +115,7 @@ export function registerFleetApi(app: FastifyInstance, db: Pool): void {
     {
       schema: {
         description:
-          'Get room-wide winding machine state counts, open bug reports, and coil outcome rollups across TODAY, WEEK, MONTH, and ALL_TIME',
+          'Get room-wide winding machine state counts, open bug reports, and ESP32 winding cycle rollups across TODAY, WEEK, MONTH, and ALL_TIME',
         response: {
           200: {
             type: 'object',
@@ -203,7 +203,7 @@ export function registerFleetApi(app: FastifyInstance, db: Pool): void {
     {
       schema: {
         description:
-          'Fetch machine drill-down details including active glossary guidance, recent errors, recent bug reports, coil rollups, and Worker Portal URL',
+          'Fetch machine drill-down details including active glossary guidance, recent errors, recent bug reports, ESP32 winding cycle rollups, and Worker Portal URL',
         params: {
           type: 'object',
           required: ['machineId'],

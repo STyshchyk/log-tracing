@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: Winding Room Engineering
+    orgId: 1
+    folder: Winding Room Engineering
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

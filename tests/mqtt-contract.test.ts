@@ -33,7 +33,7 @@ describe('mqtt contract', () => {
       'INFO',
     ]);
     expect(ERROR_EVENT_TYPES).toEqual(['ERROR', 'FAULT', 'SUBSYSTEM_TIMEOUT', 'CRASH_RESET']);
-    expect(COIL_OUTCOMES).toEqual(['COMPLETED', 'ABORTED']);
+    expect(COIL_OUTCOMES).toEqual(['AUTO_FINISHED', 'ABORTED', 'FAULT_TERMINATED']);
     expect(BUG_REPORT_TAGS).toEqual(['Fiber Snap', 'Tension', 'Unit Dead', 'Bobbin Jam', 'Other']);
     expect(FLOOR_ZONES).toEqual(['NORTH_LEFT', 'NORTH_RIGHT', 'MAIN_BANK', 'EAST_DOOR']);
 
@@ -208,46 +208,65 @@ describe('mqtt contract', () => {
     }
   });
 
-  it('validates coil outcome payloads (COMPLETED/ABORTED), accepts optional reason_code and duration_sec, and explicitly rejects REDO', () => {
+  it('validates ESP32 coil outcome payloads (AUTO_FINISHED/ABORTED/FAULT_TERMINATED), accepts optional reason_code, duration_sec, and wound_length, and explicitly rejects CRM statuses (COMPLETED/FAILED/REDO)', () => {
     expect(
       parseMqttJsonPayload(
-        '{"outcome":"COMPLETED","duration_sec":142,"ts":"2026-11-19T12:10:00Z"}',
+        '{"outcome":"AUTO_FINISHED","duration_sec":142,"wound_length":124.5,"ts":"2026-11-19T12:10:00Z"}',
         coilPayloadSchema,
       ),
     ).toEqual({
-      outcome: 'COMPLETED',
+      outcome: 'AUTO_FINISHED',
       duration_sec: 142,
+      wound_length: 124.5,
       ts: '2026-11-19T12:10:00Z',
     });
 
     expect(
       parseMqttJsonPayload(
-        '{"outcome":"ABORTED","reason_code":"ERR_FIBER_SNAP","duration_sec":0}',
+        '{"outcome":"ABORTED","reason_code":"OPERATOR_ABORT","duration_sec":0,"wound_length":0}',
         coilPayloadSchema,
       ),
     ).toEqual({
       outcome: 'ABORTED',
-      reason_code: 'ERR_FIBER_SNAP',
+      reason_code: 'OPERATOR_ABORT',
       duration_sec: 0,
+      wound_length: 0,
     });
 
     expect(
-      parseMqttJsonPayload('{"outcome":"COMPLETED","reason_code":null}', coilPayloadSchema),
+      parseMqttJsonPayload(
+        '{"outcome":"FAULT_TERMINATED","reason_code":"ERR_FIBER_SNAP","duration_sec":61,"wound_length":52}',
+        coilPayloadSchema,
+      ),
     ).toEqual({
-      outcome: 'COMPLETED',
+      outcome: 'FAULT_TERMINATED',
+      reason_code: 'ERR_FIBER_SNAP',
+      duration_sec: 61,
+      wound_length: 52,
+    });
+
+    expect(
+      parseMqttJsonPayload('{"outcome":"AUTO_FINISHED","reason_code":null}', coilPayloadSchema),
+    ).toEqual({
+      outcome: 'AUTO_FINISHED',
       reason_code: null,
     });
 
     for (const invalidCoil of [
       '{"outcome":"REDO"}',
       '{"outcome":"REDO","duration_sec":60}',
+      '{"outcome":"COMPLETED"}',
+      '{"outcome":"COMPLETED","duration_sec":142}',
       '{"outcome":"FAILED"}',
-      '{"outcome":"COMPLETED","duration_sec":-1}',
-      '{"outcome":"COMPLETED","duration_sec":12.5}',
-      '{"outcome":"COMPLETED","duration_sec":null}',
+      '{"outcome":"AUTO_FINISHED","duration_sec":-1}',
+      '{"outcome":"AUTO_FINISHED","duration_sec":12.5}',
+      '{"outcome":"AUTO_FINISHED","duration_sec":null}',
+      '{"outcome":"AUTO_FINISHED","wound_length":-0.5}',
+      '{"outcome":"AUTO_FINISHED","wound_length":null}',
+      '{"outcome":"AUTO_FINISHED","wound_length":"124.5"}',
       '{"outcome":"ABORTED","reason_code":""}',
       '{"outcome":"ABORTED","reason_code":"   "}',
-      '{"outcome":"COMPLETED","extra":"nope"}',
+      '{"outcome":"AUTO_FINISHED","extra":"nope"}',
     ]) {
       expect(() => parseMqttJsonPayload(invalidCoil, coilPayloadSchema)).toThrow();
     }
