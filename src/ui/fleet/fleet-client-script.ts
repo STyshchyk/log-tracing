@@ -1,3 +1,6 @@
+import { FLEET_MARKDOWN_CLIENT_SCRIPT } from './fleet-client-markdown.js';
+import { FLEET_FLOOR_SECTION_CLIENT_HELPER } from './floor-plan.js';
+
 /**
  * Inline vanilla JS client runtime for the `/fleet` Department Heads PWA:
  * 10-second polling, floor status filters, tab switching, `<dialog>` machine drawer,
@@ -16,6 +19,7 @@ export const FLEET_CLIENT_SCRIPT = `
     machines: [],
     openMachineId: null,
     authPaused: false,
+    pollPaused: false,
   };
 
   try {
@@ -26,31 +30,9 @@ export const FLEET_CLIENT_SCRIPT = `
     return;
   }
 
-  const STATE_SYMBOLS = {
-    WORKING: '\\u25CF',
-    IDLE: '\\u25D0',
-    ERROR: '\\u25B2',
-    OFFLINE: '\\u2715',
-  };
-
-  const STATE_CLASSES = {
-    WORKING: 'status-working',
-    IDLE: 'status-idle',
-    ERROR: 'status-error',
-    OFFLINE: 'status-offline',
-  };
-
-  const ZONE_TITLES = {
-    NORTH_LEFT: 'Narrow Wing — West Wall (#1–#7)',
-    NORTH_RIGHT: 'Narrow Wing — East Wall (#8–#12)',
-    MAIN_BANK: 'Main Hall Rows (24 Units)',
-    EAST_DOOR: 'Right Stack (8 Units)',
-  };
-
-  function deriveToolLabel(machineId) {
-    const m = /^W-0*(\\d+)$/i.exec(String(machineId || ''));
-    return m ? '#' + m[1] : String(machineId || '');
-  }
+  const STATE_SYMBOLS = { WORKING: '\\u25CF', IDLE: '\\u25D0', ERROR: '\\u25B2', OFFLINE: '\\u2715' };
+  const STATE_CLASSES = { WORKING: 'status-working', IDLE: 'status-idle', ERROR: 'status-error', OFFLINE: 'status-offline' };
+${FLEET_FLOOR_SECTION_CLIENT_HELPER}
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -73,92 +55,13 @@ export const FLEET_CLIENT_SCRIPT = `
     return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
   }
 
-  function appendInlineCode(parent, text) {
-    let cursor = 0;
-    const str = String(text || '');
-    while (cursor < str.length) {
-      const open = str.indexOf('\`', cursor);
-      if (open === -1) {
-        parent.appendChild(document.createTextNode(str.slice(cursor)));
-        break;
-      }
-      const close = str.indexOf('\`', open + 1);
-      if (close === -1) {
-        parent.appendChild(document.createTextNode(str.slice(cursor)));
-        break;
-      }
-      if (open > cursor) {
-        parent.appendChild(document.createTextNode(str.slice(cursor, open)));
-      }
-      parent.appendChild(el('code', '', str.slice(open + 1, close)));
-      cursor = close + 1;
-    }
+  function formatNodeVersionLabel(machine) {
+    const parts = [];
+    if (machine.fw_version) parts.push('FW ' + machine.fw_version);
+    if (machine.preset_version) parts.push('PR ' + machine.preset_version);
+    return parts.join(' · ');
   }
-
-  function renderMarkdownSafe(markdown) {
-    const container = el('div', 'fix-steps');
-    const lines = String(markdown || '').replace(/\\r\\n?/g, '\\n').split('\\n');
-    let listEl = null;
-    let listTag = null;
-    let paraLines = [];
-
-    const flushPara = () => {
-      if (paraLines.length > 0) {
-        const p = el('p');
-        appendInlineCode(p, paraLines.join(' '));
-        container.appendChild(p);
-        paraLines = [];
-      }
-    };
-    const flushList = () => {
-      if (listEl) {
-        container.appendChild(listEl);
-      }
-      listEl = null;
-      listTag = null;
-    };
-
-    for (const rawLine of lines) {
-      const trimmed = rawLine.trim();
-      if (!trimmed) {
-        flushPara();
-        flushList();
-        continue;
-      }
-      const ordered = /^\\s*\\d+\\.\\s+(.+)$/.exec(rawLine);
-      if (ordered) {
-        flushPara();
-        if (listTag !== 'ol') {
-          flushList();
-          listTag = 'ol';
-          listEl = document.createElement('ol');
-        }
-        const li = el('li');
-        appendInlineCode(li, ordered[1].trim());
-        listEl.appendChild(li);
-        continue;
-      }
-      const bullet = /^\\s*[-*]\\s+(.+)$/.exec(rawLine);
-      if (bullet) {
-        flushPara();
-        if (listTag !== 'ul') {
-          flushList();
-          listTag = 'ul';
-          listEl = document.createElement('ul');
-        }
-        const li = el('li');
-        appendInlineCode(li, bullet[1].trim());
-        listEl.appendChild(li);
-        continue;
-      }
-      flushList();
-      paraLines.push(trimmed);
-    }
-    flushPara();
-    flushList();
-    return container;
-  }
-
+${FLEET_MARKDOWN_CLIENT_SCRIPT}
   function renderSummaryStrip() {
     if (!state.summary) return;
     const mc = state.summary.machine_counts || {};
@@ -197,38 +100,44 @@ export const FLEET_CLIENT_SCRIPT = `
     const bucket = rollups.find((r) => r.window === state.selectedWindow) || rollups[0];
     if (bucket) {
       const autoEl = document.getElementById('coil-auto-finished');
+      const rateEl = document.getElementById('coil-auto-rate');
       const abortEl = document.getElementById('coil-aborted');
       const faultEl = document.getElementById('coil-fault-terminated');
       const woundEl = document.getElementById('coil-wound-length');
       const totCyclesEl = document.getElementById('coil-total-cycles');
-      if (autoEl) autoEl.textContent = String(bucket.auto_finished_count ?? 0);
+      const autoCount = bucket.auto_finished_count ?? 0;
+      const totCount = bucket.total_count ?? 0;
+      if (autoEl) autoEl.textContent = String(autoCount);
+      if (rateEl) rateEl.textContent = totCount > 0 ? Math.round((autoCount / totCount) * 100) + '%' : '0%';
       if (abortEl) abortEl.textContent = String(bucket.aborted_count ?? 0);
       if (faultEl) faultEl.textContent = String(bucket.fault_terminated_count ?? 0);
       if (woundEl) woundEl.textContent = formatWoundLength(bucket.total_wound_length ?? 0);
-      if (totCyclesEl) totCyclesEl.textContent = String(bucket.total_count ?? 0) + ' cycles';
+      if (totCyclesEl) totCyclesEl.textContent = String(totCount) + ' cycles';
     }
   }
 
   function applyMapFilter() {
     let visibleCount = 0;
     const totalCount = document.querySelectorAll('.map-node').length;
-    const zoneVisible = { NORTH_LEFT: 0, NORTH_RIGHT: 0, MAIN_BANK: 0, EAST_DOOR: 0 };
+    const sectionVisible = { narrow_west: 0, narrow_east: 0, main_hall: 0, right_stack: 0, reserve_bay: 0 };
 
     for (const node of document.querySelectorAll('.map-node')) {
       const matches = state.selectedFilterState === 'ALL' || node.dataset.state === state.selectedFilterState;
-      node.hidden = !matches;
+      const cell = node.closest('.map-unit-cell');
+      if (cell) cell.hidden = !matches;
+      else node.hidden = !matches;
       if (matches) {
         visibleCount += 1;
-        const z = node.dataset.zone;
-        if (z && z in zoneVisible) zoneVisible[z] += 1;
+        const sec = node.dataset.section;
+        if (sec && sec in sectionVisible) sectionVisible[sec] += 1;
       }
     }
 
-    for (const zoneEl of document.querySelectorAll('.zone-bay')) {
-      const z = zoneEl.dataset.zone;
-      const count = z && z in zoneVisible ? zoneVisible[z] : 0;
-      zoneEl.dataset.emptyFiltered = count === 0 ? 'true' : 'false';
-      const badge = zoneEl.querySelector('[data-zone-count]');
+    for (const secEl of document.querySelectorAll('.zone-bay')) {
+      const sec = secEl.dataset.section;
+      const count = sec && sec in sectionVisible ? sectionVisible[sec] : 0;
+      secEl.dataset.emptyFiltered = count === 0 ? 'true' : 'false';
+      const badge = secEl.querySelector('[data-section-count]');
       if (badge) badge.textContent = String(count);
     }
 
@@ -244,12 +153,26 @@ export const FLEET_CLIENT_SCRIPT = `
     for (const machine of state.machines) {
       const node = document.querySelector('.map-node[data-machine-id="' + CSS.escape(machine.id) + '"]');
       if (!node) continue;
-      const toolLabel = node.getAttribute('data-tool-label') || deriveToolLabel(machine.id);
+      const posStr = machine.floor_position != null ? String(machine.floor_position) : '';
+      const hwStr = machine.hardware_id || '';
+      const cell = node.closest('.map-unit-cell');
+      if (cell) {
+        cell.dataset.state = machine.current_state;
+        cell.dataset.floorPosition = posStr;
+        cell.dataset.hardwareId = hwStr;
+      }
+
+      const toolLabel = deriveToolLabel(machine.id, machine.floor_position);
+      node.dataset.toolLabel = toolLabel;
       node.dataset.state = machine.current_state;
+      node.dataset.floorPosition = posStr;
+      node.dataset.hardwareId = hwStr;
+      node.dataset.fwVersion = machine.fw_version || '';
+      node.dataset.presetVersion = machine.preset_version || '';
       node.className = 'map-node mt-unit ' + (STATE_CLASSES[machine.current_state] || 'status-offline');
       node.setAttribute(
         'aria-label',
-        toolLabel + ' (' + machine.id + ' ' + machine.display_name + '), ' + machine.current_state +
+        toolLabel + ' (' + machine.id + ' ' + machine.display_name + (hwStr ? ', ESP32 ' + hwStr : '') + '), ' + machine.current_state +
           (machine.active_error ? ', active error ' + machine.active_error : ''),
       );
       const iconEl = node.querySelector('.badge-icon');
@@ -258,6 +181,30 @@ export const FLEET_CLIENT_SCRIPT = `
       if (labelEl) labelEl.textContent = machine.current_state;
 
       const deskEl = node.querySelector('.mt-desk') || node;
+      let hwEl = node.querySelector('.node-hw-meta');
+      if (hwStr) {
+        if (!hwEl) {
+          hwEl = el('span', 'node-hw-meta');
+          const insertRef = node.querySelector('.node-fw-meta') || node.querySelector('.node-update-pill');
+          deskEl.insertBefore(hwEl, insertRef || null);
+        }
+        hwEl.textContent = hwStr;
+      } else if (hwEl) {
+        hwEl.remove();
+      }
+
+      const versionLabel = formatNodeVersionLabel(machine);
+      let fwEl = node.querySelector('.node-fw-meta');
+      if (versionLabel) {
+        if (!fwEl) {
+          fwEl = el('span', 'node-fw-meta');
+          deskEl.appendChild(fwEl);
+        }
+        fwEl.textContent = versionLabel;
+      } else if (fwEl) {
+        fwEl.remove();
+      }
+
       let errEl = node.querySelector('.node-error-code');
       if (machine.active_error) {
         if (!errEl) {
@@ -270,6 +217,7 @@ export const FLEET_CLIENT_SCRIPT = `
       }
     }
     applyMapFilter();
+    document.dispatchEvent(new CustomEvent('fleet:machines-updated', { detail: { machines: state.machines } }));
   }
 
   // Tabs (selection follows focus / click + beforematch for hidden="until-found")
@@ -369,34 +317,29 @@ export const FLEET_CLIENT_SCRIPT = `
     });
 
     if (!('closedBy' in HTMLDialogElement.prototype)) {
-      const isOutside = (event) => {
-        const rect = drawer.getBoundingClientRect();
-        return (
-          event.clientX < rect.left ||
-          event.clientX > rect.right ||
-          event.clientY < rect.top ||
-          event.clientY > rect.bottom
-        );
+      const isOutside = (e) => {
+        const r = drawer.getBoundingClientRect();
+        return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
       };
       let pressedOutside = false;
       drawer.addEventListener('pointerdown', (e) => { pressedOutside = isOutside(e); });
-      drawer.addEventListener('pointerup', (e) => {
-        if (pressedOutside && isOutside(e)) drawer.close();
-      });
+      drawer.addEventListener('pointerup', (e) => { if (pressedOutside && isOutside(e)) drawer.close(); });
     }
   }
 
   function renderDrawerContent(details) {
     if (!drawerBody || !drawerTitle) return;
     const m = details.machine;
-    const toolLabel = deriveToolLabel(m.id);
+    const toolLabel = deriveToolLabel(m.id, m.floor_position);
+    const secKey = resolveSection(m);
+    const sectionTitle = SECTION_TITLES[secKey] || secKey;
     drawerTitle.textContent = toolLabel + ' (' + m.id + ') — ' + m.display_name;
     drawerBody.textContent = '';
 
     // Overview section
     const overview = el('div', 'drawer-section');
-    const zoneName = ZONE_TITLES[m.zone] || m.zone;
-    overview.appendChild(el('p', 'machine-meta', 'Floor Slot ' + toolLabel + ' · ' + zoneName + ' · Grid (' + m.grid_row + ', ' + m.grid_col + ')'));
+    overview.appendChild(el('p', 'machine-meta', 'Floor Position ' + toolLabel + ' · ' + sectionTitle));
+    overview.appendChild(el('p', 'machine-meta', 'ESP32 Hardware: ' + (m.hardware_id || 'Unassigned (legacy ID fallback)')));
 
     const badge = el('span', 'status-badge ' + (STATE_CLASSES[m.current_state] || 'status-offline'));
     badge.textContent = (STATE_SYMBOLS[m.current_state] || '') + ' ' + m.current_state;
@@ -497,6 +440,7 @@ export const FLEET_CLIENT_SCRIPT = `
       bugSec.appendChild(ul);
     }
     drawerBody.appendChild(bugSec);
+    document.dispatchEvent(new CustomEvent('fleet:drawer-rendered', { detail: { details, drawerBody } }));
   }
 
   function handleAuthFailure(res) {
@@ -536,6 +480,21 @@ export const FLEET_CLIENT_SCRIPT = `
       drawerBody.appendChild(el('p', '', 'Network error while fetching machine details.'));
     }
   }
+
+  document.addEventListener('fleet:refresh-drawer', () => {
+    if (state.openMachineId && drawer && drawer.open) {
+      void openMachineDrawer(state.openMachineId);
+    }
+  });
+
+  document.addEventListener('fleet:open-machine', (event) => {
+    const id = event.detail && event.detail.machineId;
+    if (id) void openMachineDrawer(id);
+  });
+
+  document.addEventListener('fleet:set-poll-paused', (event) => {
+    state.pollPaused = Boolean(event.detail && event.detail.paused);
+  });
 
   document.addEventListener('click', (event) => {
     const target = event.target;
@@ -580,12 +539,14 @@ export const FLEET_CLIENT_SCRIPT = `
         if (item.error_code) badges.appendChild(el('code', 'history-inline-code', item.error_code));
       }
 
-      const toolLabel = deriveToolLabel(item.machine_id);
+      const toolLabel = deriveToolLabel(item.machine_id, item.floor_position);
+      const secKey = resolveSection({ id: item.machine_id, floor_position: item.floor_position });
       const mBtn = el('button', 'history-machine-btn', toolLabel + ' · ' + item.machine_id + ' · ' + item.machine_display_name);
       mBtn.type = 'button';
       mBtn.setAttribute('data-open-machine', item.machine_id);
       badges.appendChild(mBtn);
-      badges.appendChild(el('span', 'zone-pill', ZONE_TITLES[item.zone] || item.zone));
+      badges.appendChild(el('span', 'zone-pill', SECTION_TITLES[secKey] || secKey));
+      if (item.hardware_id) badges.appendChild(el('span', 'zone-pill', item.hardware_id));
       top.appendChild(badges);
 
       const t = el('time', 'last-seen', formatUtc(item.time));
@@ -606,16 +567,15 @@ export const FLEET_CLIENT_SCRIPT = `
 
       historyList.appendChild(li);
     }
+    document.dispatchEvent(new CustomEvent('fleet:history-rendered'));
   }
 
   async function refreshHistory() {
     if (!historyForm || state.authPaused) return;
     const params = new URLSearchParams();
     const kind = historyForm.querySelector('#history-kind')?.value;
-    const zone = historyForm.querySelector('#history-zone')?.value;
     const machineId = historyForm.querySelector('#history-machine')?.value?.trim();
     if (kind && kind !== 'all') params.set('kind', kind);
-    if (zone) params.set('zone', zone);
     if (machineId) params.set('machineId', machineId);
 
     const res = await fetch('/api/fleet/history?' + params.toString(), {
@@ -717,20 +677,16 @@ export const FLEET_CLIENT_SCRIPT = `
       if (includeHistory || state.activeTab === 'history') {
         await refreshHistory();
       }
+      document.dispatchEvent(new CustomEvent('fleet:refreshed'));
     } catch {
       // Transient LAN glitches will retry cleanly on the next 10s poll tick.
     }
   }
 
-  const refreshBtn = document.getElementById('fleet-refresh-btn');
-  if (refreshBtn) {
-    refreshBtn.addEventListener('click', () => { void refreshAll(true); });
-  }
-
+  document.getElementById('fleet-refresh-btn')?.addEventListener('click', () => { void refreshAll(true); });
+  document.addEventListener('fleet:refresh-all', () => { void refreshAll(true); });
   setInterval(() => {
-    if (!document.hidden && !state.authPaused) {
-      void refreshAll(false);
-    }
+    if (!document.hidden && !state.authPaused && !state.pollPaused) void refreshAll(false);
   }, 10000);
 
   renderSummaryStrip();

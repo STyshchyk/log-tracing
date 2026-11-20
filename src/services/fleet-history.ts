@@ -2,7 +2,6 @@ import type { Pool } from 'pg';
 import {
   ERROR_EVENT_TYPES,
   type BugReportTag,
-  type FloorZone,
 } from '../spec/mqtt-contract.js';
 import { normalizeMachineId } from './machines.js';
 import {
@@ -26,7 +25,7 @@ export type FleetHistoryKind = (typeof FLEET_HISTORY_KINDS)[number];
 export interface ListFleetHistoryOptions {
   limit?: number | undefined;
   machineId?: string | undefined;
-  zone?: FloorZone | undefined;
+  zone?: string | undefined;
   kind?: FleetHistoryKind | undefined;
 }
 
@@ -38,7 +37,9 @@ export interface FleetHistoryErrorEventItem {
   time: string;
   machine_id: string;
   machine_display_name: string;
-  zone: FloorZone;
+  zone: string;
+  floor_position: number | null;
+  hardware_id: string | null;
   event_type: string;
   error_code: string | null;
   glossary_title: string | null;
@@ -53,7 +54,9 @@ export interface FleetHistoryBugReportItem {
   time: string;
   machine_id: string;
   machine_display_name: string;
-  zone: FloorZone;
+  zone: string;
+  floor_position: number | null;
+  hardware_id: string | null;
   bug_report_id: number;
   tag: BugReportTag;
   error_code: string | null;
@@ -70,7 +73,9 @@ interface FleetHistoryEventRow {
   time: Date;
   machine_id: string;
   machine_display_name: string;
-  zone: FloorZone;
+  zone: string;
+  floor_position: number | null;
+  hardware_id: string | null;
   event_type: string;
   error_code: string | null;
   glossary_title: string | null;
@@ -82,7 +87,9 @@ interface FleetHistoryBugReportRow {
   created_at: Date;
   machine_id: string;
   machine_display_name: string;
-  zone: FloorZone;
+  zone: string;
+  floor_position: number | null;
+  hardware_id: string | null;
   tag: BugReportTag;
   error_code: string | null;
   worker_note: string | null;
@@ -137,6 +144,8 @@ export async function listFleetHistory(
                te.machine_id,
                m.display_name AS machine_display_name,
                m.zone,
+               m.floor_position,
+               m.hardware_id,
                te.event_type,
                te.error_code,
                eg.title AS glossary_title,
@@ -156,6 +165,8 @@ export async function listFleetHistory(
               machine_id: row.machine_id,
               machine_display_name: row.machine_display_name,
               zone: row.zone,
+              floor_position: row.floor_position,
+              hardware_id: row.hardware_id,
               event_type: row.event_type,
               error_code: row.error_code,
               glossary_title: row.glossary_title,
@@ -188,6 +199,8 @@ export async function listFleetHistory(
                br.machine_id,
                m.display_name AS machine_display_name,
                m.zone,
+               m.floor_position,
+               m.hardware_id,
                br.tag,
                br.error_code,
                br.worker_note,
@@ -206,6 +219,8 @@ export async function listFleetHistory(
               machine_id: row.machine_id,
               machine_display_name: row.machine_display_name,
               zone: row.zone,
+              floor_position: row.floor_position,
+              hardware_id: row.hardware_id,
               bug_report_id: Number(row.id),
               tag: row.tag,
               error_code: row.error_code,

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { coilPayloadSchema } from '../spec/mqtt-contract.js';
 import {
+  buildMatchedMachineCte,
   defaultMqttLogger,
   parseMqttTimestamp,
   subscribeWinderChannel,
@@ -44,10 +45,10 @@ export async function registerCoilIngestion(
       }
 
       const insertResult = await db.query<{ id: string }>(
-        `INSERT INTO coil_outcomes (machine_id, outcome, reason_code, duration_sec, wound_length, created_at)
-         SELECT m.id, $2::text, $3::text, $4::integer, $5::double precision, COALESCE($6::timestamptz, NOW())
-         FROM machines m
-         WHERE m.id = $1::text
+        `WITH ${buildMatchedMachineCte(1)}
+         INSERT INTO coil_outcomes (machine_id, outcome, reason_code, duration_sec, wound_length, created_at)
+         SELECT matched_machine.id, $2::text, $3::text, $4::integer, $5::double precision, COALESCE($6::timestamptz, NOW())
+         FROM matched_machine
          RETURNING id`,
         [
           machineId,

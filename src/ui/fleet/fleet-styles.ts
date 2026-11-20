@@ -1,4 +1,6 @@
 import { FLEET_BLUEPRINT_COMPONENT_STYLES } from './fleet-blueprint-styles.js';
+import { FLEET_OTA_COMPONENT_STYLES } from './fleet-ota-styles.js';
+import { FLEET_TRIAGE_COMPONENT_STYLES } from './fleet-triage-styles.js';
 
 /**
  * Complete embedded CSS stylesheet for the zero-CDN `/fleet` Department Heads PWA.
@@ -8,74 +10,61 @@ export const FLEET_STYLES = `
 
 @layer base {
   :root {
-    color-scheme: light dark;
-    --bg: #f4f6f8;
-    --surface: #ffffff;
-    --surface-subtle: #edf1f5;
-    --text: #111827;
-    --text-muted: #4b5563;
-    --border: #9ca3af;
-    --focus-ring: #0b57d0;
-    --accent-primary: #0f4c81;
-    --accent-primary-hover: #0b3a63;
+    color-scheme: dark;
+    --bg: #0b1120;
+    --surface: #111827;
+    --surface-subtle: #1e293b;
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border: #334155;
+    --focus-ring: #818cf8;
+    --accent-primary: #4f46e5;
+    --accent-primary-hover: #6366f1;
     --accent-primary-text: #ffffff;
-    --working-bg: #e6f4ea;
-    --working-text: #0d5c2d;
-    --working-border: #1e7e44;
-    --idle-bg: #fef7e0;
-    --idle-text: #7a4f01;
-    --idle-border: #b06e00;
-    --error-bg: #fce8e6;
-    --error-text: #a50e0e;
-    --error-border: #c5221f;
-    --offline-bg: #f1f3f4;
-    --offline-text: #3c4043;
-    --offline-border: #5f6368;
-    --blueprint-floor: #e5eff5;
-    --blueprint-wall: #7d8790;
-    --blueprint-wall-border: #2f3740;
-    --blueprint-wood: #d9bf8c;
-    --blueprint-wood-border: #6b5328;
-    --blueprint-chair: #8b96a3;
+    --working-bg: #06281e;
+    --working-text: #6ee7b7;
+    --working-border: #10b981;
+    --idle-bg: #2e1f05;
+    --idle-text: #fcd34d;
+    --idle-border: #f59e0b;
+    --error-bg: #3b0d17;
+    --error-text: #fda4af;
+    --error-border: #f43f5e;
+    --offline-bg: #1e293b;
+    --offline-text: #cbd5e1;
+    --offline-border: #64748b;
+    --blueprint-floor: #111c2d;
+    --blueprint-wall: #334155;
+    --blueprint-wall-border: #64748b;
+    --blueprint-wood: #3d311d;
+    --blueprint-wood-border: #947441;
+    --blueprint-chair: #475569;
+    --scrollbar-track: #0b1120;
+    --scrollbar-thumb: #475569;
     --target-min: 48px;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+    accent-color: var(--accent-primary);
+  }
+
+  @supports not (scrollbar-color: auto) {
+    *::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    *::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 999px;
+    }
+
+    *::-webkit-scrollbar-track {
+      background: var(--scrollbar-track);
+    }
   }
 
   @media (pointer: coarse) {
     :root {
       --target-min: 52px;
-    }
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1419;
-      --surface: #1a2129;
-      --surface-subtle: #242d38;
-      --text: #f3f4f6;
-      --text-muted: #cbd5e1;
-      --border: #64748b;
-      --focus-ring: #7cb3ff;
-      --accent-primary: #2563eb;
-      --accent-primary-hover: #1d4ed8;
-      --accent-primary-text: #ffffff;
-      --working-bg: #0f2f1c;
-      --working-text: #86efac;
-      --working-border: #22c55e;
-      --idle-bg: #332404;
-      --idle-text: #fde68a;
-      --idle-border: #f59e0b;
-      --error-bg: #3b1214;
-      --error-text: #fca5a5;
-      --error-border: #ef4444;
-      --offline-bg: #1f2937;
-      --offline-text: #d1d5db;
-      --offline-border: #9ca3af;
-      --blueprint-floor: #16222c;
-      --blueprint-wall: #475569;
-      --blueprint-wall-border: #94a3b8;
-      --blueprint-wood: #524124;
-      --blueprint-wood-border: #a18049;
-      --blueprint-chair: #64748b;
     }
   }
 
@@ -402,6 +391,8 @@ export const FLEET_STYLES = `
     color: var(--accent-primary-text);
   }
 ${FLEET_BLUEPRINT_COMPONENT_STYLES}
+${FLEET_OTA_COMPONENT_STYLES}
+${FLEET_TRIAGE_COMPONENT_STYLES}
   .history-controls,
   .glossary-controls {
     display: flex;
@@ -647,6 +638,9 @@ ${FLEET_BLUEPRINT_COMPONENT_STYLES}
     .plan-narrow-wing,
     .plan-main-hall,
     .plan-legend-box,
+    .attention-card,
+    .compact-tile,
+    .glossary-popover,
     dialog.machine-drawer {
       border-color: CanvasText;
     }

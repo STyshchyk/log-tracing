@@ -32,7 +32,7 @@ describe('50-winder fleet CSV parsing and idempotent seeding', () => {
     await db?.end();
   });
 
-  it('docs/fleet-seed.csv defines exactly 50 unique winders W-01..W-50 across all four L-shaped zones', () => {
+  it('docs/fleet-seed.csv defines exactly 50 unique winders W-01..W-50 mapped by floor_position without legacy zone labels', () => {
     const machines = loadFleetSeedCsv();
     expect(machines).toHaveLength(50);
 
@@ -44,49 +44,41 @@ describe('50-winder fleet CSV parsing and idempotent seeding', () => {
     expect(machines[0]).toEqual({
       id: 'W-01',
       display_name: 'Winder 01',
-      zone: 'NORTH_LEFT',
-      grid_row: 1,
-      grid_col: 1,
+      floor_position: 1,
+      hardware_id: null,
     });
-    expect(machines[1]).toEqual({
-      id: 'W-02',
-      display_name: 'Winder 02',
-      zone: 'NORTH_LEFT',
-      grid_row: 1,
-      grid_col: 2,
+    expect(machines[22]).toEqual({
+      id: 'W-23',
+      display_name: 'Winder 23',
+      floor_position: 23,
+      hardware_id: null,
     });
 
-    const byZone = new Map<string, number>();
-    for (const m of machines) {
-      byZone.set(m.zone, (byZone.get(m.zone) ?? 0) + 1);
-    }
-    expect(Object.fromEntries(byZone)).toEqual({
-      NORTH_LEFT: 10,
-      NORTH_RIGHT: 10,
-      MAIN_BANK: 24,
-      EAST_DOOR: 6,
-    });
+    const positions = machines.map((m) => m.floor_position);
+    expect(positions[0]).toBe(1);
+    expect(positions[49]).toBe(50);
+    expect(new Set(positions).size).toBe(50);
   });
 
-  it('parseFleetSeedCsv rejects invalid headers, unknown zones, invalid coordinates, duplicate IDs, and duplicate floor slots', () => {
+  it('parseFleetSeedCsv rejects invalid headers, non-positive floor positions, invalid hardware IDs, and duplicates', () => {
     expect(() =>
-      parseFleetSeedCsv('id,name,zone,row,col\nW-01,Winder 01,NORTH_LEFT,1,1'),
+      parseFleetSeedCsv('id,name,floor_position,hardware_id\nW-01,Winder 01,1,'),
     ).toThrow(/Invalid fleet CSV header/);
 
     expect(() =>
-      parseFleetSeedCsv('id,display_name,zone,grid_row,grid_col\nW-01,Winder 01,WEST_WING,1,1'),
-    ).toThrow(/Invalid floor zone/);
+      parseFleetSeedCsv('id,display_name,floor_position,hardware_id\nW-01,Winder 01,0,'),
+    ).toThrow(/Invalid floor_position/);
 
     expect(() =>
-      parseFleetSeedCsv('id,display_name,zone,grid_row,grid_col\nW-01,Winder 01,NORTH_LEFT,0,1'),
-    ).toThrow(/Invalid grid coordinates/);
+      parseFleetSeedCsv('id,display_name,floor_position,hardware_id\nW-01,Winder 01,1,bad/topic'),
+    ).toThrow(/Invalid hardware_id/);
 
     expect(() =>
       parseFleetSeedCsv(
         [
-          'id,display_name,zone,grid_row,grid_col',
-          'W-01,Winder 01,NORTH_LEFT,1,1',
-          'W-01,Winder 01b,NORTH_LEFT,1,2',
+          'id,display_name,floor_position,hardware_id',
+          'W-01,Winder 01,1,',
+          'W-01,Winder 01b,2,',
         ].join('\n'),
       ),
     ).toThrow(/Duplicate machine ID/);
@@ -94,20 +86,32 @@ describe('50-winder fleet CSV parsing and idempotent seeding', () => {
     expect(() =>
       parseFleetSeedCsv(
         [
-          'id,display_name,zone,grid_row,grid_col',
-          'W-01,Winder 01,NORTH_LEFT,1,1',
-          'W-02,Winder 02,NORTH_LEFT,1,1',
+          'id,display_name,floor_position,hardware_id',
+          'W-01,Winder 01,5,',
+          'W-02,Winder 02,5,',
         ].join('\n'),
       ),
-    ).toThrow(/Duplicate floor slot/);
+    ).toThrow(/Duplicate floor_position/);
+
+    expect(() =>
+      parseFleetSeedCsv(
+        [
+          'id,display_name,floor_position,hardware_id',
+          'W-01,Winder 01,1,esp32-dup',
+          'W-02,Winder 02,2,esp32-dup',
+        ].join('\n'),
+      ),
+    ).toThrow(/Duplicate hardware_id/);
   });
 
-  it('seedFleetMachines inserts, reports unchanged on repeat, updates changed metadata, and preserves live telemetry', async () => {
-    const prefix = `T22-${randomUUID().slice(0, 6)}`;
+  it('seedFleetMachines inserts, reports unchanged on repeat, updates changed metadata, and preserves live telemetry and existing hardware_id', async () => {
+    const suffix = randomUUID().slice(0, 6);
+    const prefix = `T22-${suffix}`;
+    const basePos = 300_000 + Math.floor(Math.random() * 500_000);
     const initial: PilotMachineSeed[] = [
-      { id: `${prefix}-01`, display_name: 'Seed A', zone: 'NORTH_LEFT', grid_row: 1, grid_col: 1 },
-      { id: `${prefix}-02`, display_name: 'Seed B', zone: 'MAIN_BANK', grid_row: 2, grid_col: 3 },
-      { id: `${prefix}-03`, display_name: 'Seed C', zone: 'EAST_DOOR', grid_row: 1, grid_col: 2 },
+      { id: `${prefix}-01`, display_name: 'Seed A', floor_position: basePos + 1, hardware_id: `esp32-${suffix}-a` },
+      { id: `${prefix}-02`, display_name: 'Seed B', floor_position: basePos + 2, hardware_id: null },
+      { id: `${prefix}-03`, display_name: 'Seed C', floor_position: basePos + 3, hardware_id: null },
     ];
     createdIds.push(...initial.map((m) => m.id));
 
@@ -126,7 +130,7 @@ describe('50-winder fleet CSV parsing and idempotent seeding', () => {
     expect(repeat).toEqual({ total: 3, inserted: 0, updated: 0, unchanged: 3 });
 
     const modified: PilotMachineSeed[] = [
-      { id: `${prefix}-01`, display_name: 'Seed A Renamed', zone: 'NORTH_RIGHT', grid_row: 2, grid_col: 4 },
+      { id: `${prefix}-01`, display_name: 'Seed A Renamed', floor_position: basePos + 10, hardware_id: null },
       initial[1]!,
       initial[2]!,
     ];
@@ -136,13 +140,13 @@ describe('50-winder fleet CSV parsing and idempotent seeding', () => {
     const rowRes = await db.query<{
       display_name: string;
       zone: string;
-      grid_row: number;
-      grid_col: number;
+      floor_position: number | null;
+      hardware_id: string | null;
       current_state: string;
       active_error: string | null;
       last_seen_at: Date | null;
     }>(
-      `SELECT display_name, zone, grid_row, grid_col, current_state, active_error, last_seen_at
+      `SELECT display_name, zone, floor_position, hardware_id, current_state, active_error, last_seen_at
        FROM machines
        WHERE id = $1`,
       [`${prefix}-01`],
@@ -150,9 +154,9 @@ describe('50-winder fleet CSV parsing and idempotent seeding', () => {
 
     expect(rowRes.rows[0]).toMatchObject({
       display_name: 'Seed A Renamed',
-      zone: 'NORTH_RIGHT',
-      grid_row: 2,
-      grid_col: 4,
+      zone: 'FLOOR',
+      floor_position: basePos + 10,
+      hardware_id: `esp32-${suffix}-a`,
       current_state: 'ERROR',
       active_error: 'ERR_FIBER_SNAP',
     });

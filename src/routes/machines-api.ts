@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { getMachineById } from '../services/machines.js';
-import { FLOOR_ZONES, MACHINE_STATES } from '../spec/mqtt-contract.js';
-import { machineNotFoundResponseSchema, sendMachineNotFound } from './api-schemas.js';
+import {
+  machineNotFoundResponseSchema,
+  machineRecordResponseSchema,
+  sendMachineNotFound,
+} from './api-schemas.js';
 
 interface MachineParams {
   machineId: string;
@@ -17,7 +20,7 @@ export function registerMachinesApi(app: FastifyInstance, db: Pool): void {
     {
       schema: {
         description:
-          'Fetch a registered winding machine metadata, live operational state, active error_code, and last_seen_at timestamp',
+          'Fetch a registered winding machine metadata, live operational state, active error_code, firmware/preset versions, and last_seen_at timestamp',
         params: {
           type: 'object',
           required: ['machineId'],
@@ -29,29 +32,7 @@ export function registerMachinesApi(app: FastifyInstance, db: Pool): void {
           },
         },
         response: {
-          200: {
-            type: 'object',
-            required: [
-              'id',
-              'display_name',
-              'zone',
-              'grid_row',
-              'grid_col',
-              'current_state',
-              'active_error',
-              'last_seen_at',
-            ],
-            properties: {
-              id: { type: 'string' },
-              display_name: { type: 'string' },
-              zone: { type: 'string', enum: [...FLOOR_ZONES] },
-              grid_row: { type: 'integer' },
-              grid_col: { type: 'integer' },
-              current_state: { type: 'string', enum: [...MACHINE_STATES] },
-              active_error: { type: 'string', nullable: true },
-              last_seen_at: { type: 'string', format: 'date-time', nullable: true },
-            },
-          },
+          200: machineRecordResponseSchema,
           404: machineNotFoundResponseSchema,
         },
       },

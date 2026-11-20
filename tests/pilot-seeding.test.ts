@@ -6,7 +6,7 @@ import {
   seedPilotMachines,
   type PilotMachineSeed,
 } from '../src/db/seed-pilot-machines.js';
-import { FLOOR_ZONES, MACHINE_STATES } from '../src/spec/mqtt-contract.js';
+import { MACHINE_STATES } from '../src/spec/mqtt-contract.js';
 import { createTestApp, type TestAppContext } from './helpers/test-app.js';
 
 describe('pilot machine seeding (W-01, W-02)', () => {
@@ -29,21 +29,19 @@ describe('pilot machine seeding (W-01, W-02)', () => {
     await ctx?.close();
   });
 
-  it('idempotently seeds W-01 and W-02 in NORTH_LEFT and exposes them via GET /api/machines/:machineId', async () => {
+  it('idempotently seeds W-01 and W-02 at floor_position 1 and 2 and exposes them via GET /api/machines/:machineId', async () => {
     expect(PILOT_MACHINES).toEqual([
       {
         id: 'W-01',
         display_name: 'Winder 01',
-        zone: 'NORTH_LEFT',
-        grid_row: 1,
-        grid_col: 1,
+        floor_position: 1,
+        hardware_id: null,
       },
       {
         id: 'W-02',
         display_name: 'Winder 02',
-        zone: 'NORTH_LEFT',
-        grid_row: 1,
-        grid_col: 2,
+        floor_position: 2,
+        hardware_id: null,
       },
     ]);
 
@@ -56,20 +54,15 @@ describe('pilot machine seeding (W-01, W-02)', () => {
       id: string;
       display_name: string;
       zone: string;
-      grid_row: number;
-      grid_col: number;
+      floor_position: number | null;
       current_state: string;
-      active_error: string | null;
-      last_seen_at: string | null;
     }>();
     expect(w01).toMatchObject({
       id: 'W-01',
       display_name: 'Winder 01',
-      zone: 'NORTH_LEFT',
-      grid_row: 1,
-      grid_col: 1,
+      zone: 'FLOOR',
+      floor_position: 1,
     });
-    expect(FLOOR_ZONES).toContain(w01.zone);
     expect(MACHINE_STATES).toContain(w01.current_state);
 
     const res2 = await ctx.app.inject({ method: 'GET', url: '/api/machines/W-02' });
@@ -78,18 +71,15 @@ describe('pilot machine seeding (W-01, W-02)', () => {
       id: string;
       display_name: string;
       zone: string;
-      grid_row: number;
-      grid_col: number;
+      floor_position: number | null;
       current_state: string;
     }>();
     expect(w02).toMatchObject({
       id: 'W-02',
       display_name: 'Winder 02',
-      zone: 'NORTH_LEFT',
-      grid_row: 1,
-      grid_col: 2,
+      zone: 'FLOOR',
+      floor_position: 2,
     });
-    expect(FLOOR_ZONES).toContain(w02.zone);
     expect(MACHINE_STATES).toContain(w02.current_state);
   });
 
@@ -97,6 +87,8 @@ describe('pilot machine seeding (W-01, W-02)', () => {
     const suffix = randomUUID().slice(0, 8);
     const idA = `T14-A-${suffix}`;
     const idB = `T14-B-${suffix}`;
+    const basePos = 350_000 + Math.floor(Math.random() * 500_000);
+    const hwA = `esp32-${suffix}-a`;
     createdMachineIds.push(idA, idB);
 
     await seedPilotMachines(ctx.db, []);
@@ -105,16 +97,14 @@ describe('pilot machine seeding (W-01, W-02)', () => {
       {
         id: idB,
         display_name: `Test Winder B ${suffix}`,
-        zone: 'NORTH_LEFT',
-        grid_row: 1,
-        grid_col: 2,
+        floor_position: basePos + 2,
+        hardware_id: null,
       },
       {
         id: idA,
         display_name: `Test Winder A ${suffix}`,
-        zone: 'NORTH_LEFT',
-        grid_row: 1,
-        grid_col: 1,
+        floor_position: basePos + 1,
+        hardware_id: hwA,
       },
     ];
     await seedPilotMachines(ctx.db, initialSeeds);
@@ -124,11 +114,16 @@ describe('pilot machine seeding (W-01, W-02)', () => {
     expect(beforeResA.json()).toEqual({
       id: idA,
       display_name: `Test Winder A ${suffix}`,
-      zone: 'NORTH_LEFT',
+      zone: 'FLOOR',
       grid_row: 1,
       grid_col: 1,
+      floor_position: basePos + 1,
+      hardware_id: hwA,
       current_state: 'OFFLINE',
       active_error: null,
+      fw_version: null,
+      preset_version: null,
+      preset_name: null,
       last_seen_at: null,
     });
 
@@ -161,21 +156,19 @@ describe('pilot machine seeding (W-01, W-02)', () => {
     // Repeat identical seed -> live telemetry remains untouched
     await seedPilotMachines(ctx.db, initialSeeds);
 
-    // Update floor metadata -> metadata updates without clobbering live state
+    // Update floor metadata -> metadata updates without clobbering live state or existing hardware_id
     await seedPilotMachines(ctx.db, [
       {
         id: idA,
         display_name: `Relocated Winder A ${suffix}`,
-        zone: 'MAIN_BANK',
-        grid_row: 3,
-        grid_col: 4,
+        floor_position: basePos + 11,
+        hardware_id: null,
       },
       {
         id: idB,
         display_name: `Relocated Winder B ${suffix}`,
-        zone: 'EAST_DOOR',
-        grid_row: 2,
-        grid_col: 5,
+        floor_position: basePos + 12,
+        hardware_id: null,
       },
     ]);
 
@@ -184,11 +177,16 @@ describe('pilot machine seeding (W-01, W-02)', () => {
     expect(afterResA.json()).toEqual({
       id: idA,
       display_name: `Relocated Winder A ${suffix}`,
-      zone: 'MAIN_BANK',
-      grid_row: 3,
-      grid_col: 4,
+      zone: 'FLOOR',
+      grid_row: 1,
+      grid_col: 1,
+      floor_position: basePos + 11,
+      hardware_id: hwA,
       current_state: 'WORKING',
       active_error: null,
+      fw_version: null,
+      preset_version: null,
+      preset_name: null,
       last_seen_at: liveA.last_seen_at,
     });
 
@@ -197,11 +195,16 @@ describe('pilot machine seeding (W-01, W-02)', () => {
     expect(afterResB.json()).toEqual({
       id: idB,
       display_name: `Relocated Winder B ${suffix}`,
-      zone: 'EAST_DOOR',
-      grid_row: 2,
-      grid_col: 5,
+      zone: 'FLOOR',
+      grid_row: 1,
+      grid_col: 1,
+      floor_position: basePos + 12,
+      hardware_id: null,
       current_state: 'ERROR',
       active_error: 'ERR_FIBER_SNAP',
+      fw_version: null,
+      preset_version: null,
+      preset_name: null,
       last_seen_at: liveB.last_seen_at,
     });
   });
@@ -253,9 +256,7 @@ describe('pilot machine seeding (W-01, W-02)', () => {
       expect(apiMachineRes.json()).toMatchObject({
         id: pilot.id,
         display_name: pilot.display_name,
-        zone: pilot.zone,
-        grid_row: pilot.grid_row,
-        grid_col: pilot.grid_col,
+        floor_position: pilot.floor_position,
       });
 
       const apiEventsRes = await ctx.app.inject({

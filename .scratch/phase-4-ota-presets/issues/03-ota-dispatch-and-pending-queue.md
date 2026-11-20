@@ -4,11 +4,11 @@
 
 **Blocked by:** 02: Firmware Version Tracking & Release Hosting
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `pending_updates` table tracks `PENDING`, `DISPATCHED`, and `CANCELLED` updates per machine.
-- [ ] Authenticated OTA dispatch endpoint accepts a single `machineId` or an array of `machineIds`.
-- [ ] Machines in `IDLE` or `ERROR` receive the `OTA_UPDATE` MQTT command immediately; machines in `WORKING` are queued as `PENDING`.
-- [ ] `status` ingestion automatically dispatches `PENDING` updates when a machine transitions to `IDLE`.
-- [ ] Authenticated endpoint allows cancelling a `PENDING` update before dispatch.
-- [ ] Integration tests cover immediate dispatch, `WORKING` queueing, `WORKING → IDLE` auto-dispatch, and cancellation.
+- [x] `pending_updates` table tracks `PENDING`, `DISPATCHED`, and `CANCELLED` updates per machine.
+- [x] Authenticated OTA dispatch endpoint accepts a single `machineId` or an array of `machineIds`.
+- [x] Machines in `IDLE` or `ERROR` receive the `OTA_UPDATE` MQTT command immediately; machines in `WORKING` are queued as `PENDING`.
+- [x] `status` ingestion automatically dispatches `PENDING` updates when a machine transitions to `IDLE`.
+- [x] Authenticated endpoint allows cancelling a `PENDING` update before dispatch.
+- [x] Integration tests cover immediate dispatch, `WORKING` queueing, `WORKING → IDLE` auto-dispatch, and cancellation.

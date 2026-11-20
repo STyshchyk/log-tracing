@@ -1,22 +1,38 @@
 import type { FleetAuthUser } from '../auth/cloudflare-access.js';
 import type { CoilRollupCounts } from '../services/coil-rollups.js';
+import type { FirmwareReleaseRecord } from '../services/firmware.js';
 import type {
   FleetHistoryItem,
   FleetSummaryResult,
 } from '../services/fleet.js';
 import type { GlossaryEntry } from '../services/glossary.js';
 import type { MachineRecord } from '../services/machines.js';
+import type { PendingUpdateRecord } from '../services/pending-updates.js';
+import type { PresetRecord } from '../services/presets.js';
 import {
-  FLOOR_ZONES,
   MACHINE_STATES,
   type MachineState,
 } from '../spec/mqtt-contract.js';
 import { FLEET_CLIENT_SCRIPT } from './fleet/fleet-client-script.js';
-import { FLEET_STYLES } from './fleet/fleet-styles.js';
+import { FLEET_DRAWER_CONTROLS_SCRIPT } from './fleet/fleet-drawer-controls-script.js';
+import { FLEET_OTA_CLIENT_SCRIPT } from './fleet/fleet-ota-client-script.js';
 import {
-  ZONE_META,
+  renderFloorBatchToolbarHtml,
+  renderOtaManagementTabPanelHtml,
+} from './fleet/fleet-ota-panel.js';
+import { FLEET_STYLES } from './fleet/fleet-styles.js';
+import { FLEET_TRIAGE_CLIENT_SCRIPT } from './fleet/fleet-triage-client-script.js';
+import {
+  renderGlossaryPopoverHtml,
+  renderRepeatFaultBannerHtml,
+  renderTriageBoardHtml,
+  renderTriageToolbarHtml,
+} from './fleet/fleet-triage-view.js';
+import {
+  FLOOR_SECTION_META,
   deriveToolLabel,
   renderWorkshopFloorPlan,
+  resolveMachineFloorSection,
 } from './fleet/floor-plan.js';
 import { renderMarkdownToHtml } from './markdown.js';
 import { escapeHtml, renderStatusBadge } from './portal-layout.js';
@@ -31,6 +47,9 @@ export interface FleetPageViewModel {
   machines: MachineRecord[];
   history: FleetHistoryItem[];
   glossary: GlossaryEntry[];
+  releases?: FirmwareReleaseRecord[];
+  presets?: PresetRecord[];
+  updates?: PendingUpdateRecord[];
 }
 
 const ROLLUP_WINDOW_LABELS: Record<CoilRollupCounts['window'], string> = {
@@ -61,8 +80,15 @@ export function renderHistoryItemsHtml(items: readonly FleetHistoryItem[]): stri
   return items
     .map((item) => {
       const timeLabel = formatTimestampUtc(item.time);
-      const zoneTitle = ZONE_META[item.zone]?.title ?? item.zone;
-      const toolLabel = deriveToolLabel(item.machine_id);
+      const sec = resolveMachineFloorSection({
+        id: item.machine_id,
+        floor_position: item.floor_position,
+      });
+      const sectionTitle = FLOOR_SECTION_META[sec].title;
+      const toolLabel = deriveToolLabel(item.machine_id, item.floor_position);
+      const hwPillHtml = item.hardware_id
+        ? `<span class="zone-pill">${escapeHtml(item.hardware_id)}</span>`
+        : '';
 
       if (item.kind === 'error_event') {
         const badgeLabel = item.error_code ?? item.event_type;
@@ -70,12 +96,17 @@ export function renderHistoryItemsHtml(items: readonly FleetHistoryItem[]): stri
           ? `${item.glossary_title}${item.summary && item.summary !== item.glossary_title ? ` — ${item.summary}` : ''}`
           : item.summary;
 
+        const badgeHtml = item.error_code
+          ? `<button type="button" class="error-code-pill" data-glossary-code="${escapeHtml(item.error_code)}">&#9650; ${escapeHtml(badgeLabel)}</button>`
+          : `<span class="status-badge status-error"><span class="badge-icon" aria-hidden="true">&#9650;</span><code>${escapeHtml(badgeLabel)}</code></span>`;
+
         return `<li class="card history-item history-error-item">
           <div class="history-item-top">
             <div class="history-badges">
-              <span class="status-badge status-error"><span class="badge-icon" aria-hidden="true">&#9650;</span><code>${escapeHtml(badgeLabel)}</code></span>
+              ${badgeHtml}
               <button type="button" class="history-machine-btn" data-open-machine="${escapeHtml(item.machine_id)}">${escapeHtml(toolLabel)} &middot; ${escapeHtml(item.machine_id)} &middot; ${escapeHtml(item.machine_display_name)}</button>
-              <span class="zone-pill">${escapeHtml(zoneTitle)}</span>
+              <span class="zone-pill">${escapeHtml(sectionTitle)}</span>
+              ${hwPillHtml}
             </div>
             <time class="last-seen" datetime="${escapeHtml(item.time)}">${escapeHtml(timeLabel)}</time>
           </div>
@@ -96,7 +127,8 @@ export function renderHistoryItemsHtml(items: readonly FleetHistoryItem[]): stri
             <span class="bug-tag-pill">Bug #${item.bug_report_id}: ${escapeHtml(item.tag)}</span>
             ${errorTagHtml}
             <button type="button" class="history-machine-btn" data-open-machine="${escapeHtml(item.machine_id)}">${escapeHtml(toolLabel)} &middot; ${escapeHtml(item.machine_id)} &middot; ${escapeHtml(item.machine_display_name)}</button>
-            <span class="zone-pill">${escapeHtml(zoneTitle)}</span>
+            <span class="zone-pill">${escapeHtml(sectionTitle)}</span>
+            ${hwPillHtml}
           </div>
           <time class="last-seen" datetime="${escapeHtml(item.time)}">${escapeHtml(timeLabel)}</time>
         </div>
@@ -130,6 +162,9 @@ function renderGlossaryListHtml(entries: readonly GlossaryEntry[]): string {
  */
 export function renderFleetDashboardPage(model: FleetPageViewModel): string {
   const { user, summary, machines, history, glossary } = model;
+  const releases = model.releases ?? [];
+  const presets = model.presets ?? [];
+  const updates = model.updates ?? [];
   const counts = summary.machine_counts;
   const defaultBucket =
     summary.coil_rollups.find((bucket) => bucket.window === 'TODAY') ??
@@ -144,12 +179,29 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
 
   const authSummary =
     user.source === 'cloudflare-access'
-      ? `Signed in as ${user.email}`
-      : 'Local LAN Mode (Cloudflare Access disabled)';
+      ? `Authenticated as ${user.email}`
+      : 'Factory Workshop Local Console (LAN Zero-Login)';
+  const accessBadgeLabel =
+    user.source === 'cloudflare-access' ? 'Remote · Cloudflare Access' : 'LAN · Zero-Login';
+  const accessBadgeMode = user.source === 'cloudflare-access' ? 'remote' : 'lan';
+  const autoRate =
+    defaultBucket.total_count > 0
+      ? Math.round((defaultBucket.auto_finished_count / defaultBucket.total_count) * 100)
+      : 0;
+
+  const stripZone = <T extends Record<string, unknown>>(row: T): Omit<T, 'zone'> => {
+    const { zone: _ignoredZone, ...rest } = row;
+    return rest;
+  };
 
   const bootstrapPayload = serializeJsonForScript({
     summary,
-    machines,
+    machines: machines.map((m) => stripZone({ ...m })),
+    history: history.map((h) => stripZone({ ...h })),
+    glossary,
+    releases,
+    presets,
+    updates,
   });
 
   const filterStatePills = [
@@ -165,7 +217,8 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f4c81">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b1120">
   <link rel="manifest" href="/fleet/manifest.webmanifest">
   <title>Winding Room Fleet | Department Heads PWA</title>
   <style>${FLEET_STYLES}</style>
@@ -173,14 +226,27 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
 <body>
   <div class="fleet-shell">
     <header class="fleet-header">
-      <div class="fleet-title-group">
-        <h1>Winding Room Fleet</h1>
-        <p class="fleet-meta-line">
-          <span>${escapeHtml(authSummary)}</span>
-          <span>Last updated: <time id="fleet-last-updated" datetime="${escapeHtml(summary.generated_at)}">${escapeHtml(formatTimestampUtc(summary.generated_at))}</time></span>
-        </p>
+      <div class="fleet-brand-wrap">
+        <span class="brand-badge" aria-hidden="true">MCU</span>
+        <div class="fleet-title-group">
+          <div class="fleet-title-row">
+            <h1>Winding Room Fleet</h1>
+            <span class="access-pill" id="fleet-access-pill" data-access-mode="${accessBadgeMode}">${escapeHtml(accessBadgeLabel)}</span>
+          </div>
+          <p class="fleet-meta-line">
+            <span>${escapeHtml(authSummary)}</span>
+            <span>Last updated: <time id="fleet-last-updated" datetime="${escapeHtml(summary.generated_at)}">${escapeHtml(formatTimestampUtc(summary.generated_at))}</time></span>
+          </p>
+        </div>
       </div>
       <div class="fleet-header-actions">
+        <button type="button" id="fleet-poll-toggle-btn" class="poll-toggle-btn" data-paused="false" aria-pressed="false" title="Pause or resume 10s live polling">
+          <span class="poll-dot-wrap" aria-hidden="true">
+            <span class="poll-dot-ping"></span>
+            <span class="poll-dot"></span>
+          </span>
+          <span id="fleet-poll-countdown">Live (10s)</span>
+        </button>
         <button type="button" id="fleet-refresh-btn" class="btn btn-primary">Refresh Now</button>
         <a class="nav-link" href="/">Worker Directory</a>
       </div>
@@ -193,30 +259,30 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
     <section class="summary-strip" aria-label="Fleet status and winding cycle summary">
       <div class="card">
         <div class="state-counts-grid">
-          <div class="metric-box">
+          <button type="button" class="metric-box kpi-filter-card" data-kpi-filter="ALL" aria-pressed="true">
             <span class="metric-label">Total Winders</span>
             <span class="metric-value" id="count-total">${counts.total}</span>
-          </div>
-          <div class="metric-box status-working">
+          </button>
+          <button type="button" class="metric-box kpi-filter-card status-working" data-kpi-filter="WORKING" aria-pressed="false">
             <span class="metric-label"><span aria-hidden="true">&#9679;</span> Working</span>
             <span class="metric-value" id="count-working">${counts.WORKING}</span>
-          </div>
-          <div class="metric-box status-idle">
+          </button>
+          <button type="button" class="metric-box kpi-filter-card status-idle" data-kpi-filter="IDLE" aria-pressed="false">
             <span class="metric-label"><span aria-hidden="true">&#9680;</span> Idle</span>
             <span class="metric-value" id="count-idle">${counts.IDLE}</span>
-          </div>
-          <div class="metric-box status-error">
+          </button>
+          <button type="button" class="metric-box kpi-filter-card status-error" data-kpi-filter="ERROR" aria-pressed="false">
             <span class="metric-label"><span aria-hidden="true">&#9650;</span> Error</span>
             <span class="metric-value" id="count-error">${counts.ERROR}</span>
-          </div>
-          <div class="metric-box status-offline">
+          </button>
+          <button type="button" class="metric-box kpi-filter-card status-offline" data-kpi-filter="OFFLINE" aria-pressed="false">
             <span class="metric-label"><span aria-hidden="true">&#10005;</span> Offline</span>
             <span class="metric-value" id="count-offline">${counts.OFFLINE}</span>
-          </div>
-          <div class="metric-box">
+          </button>
+          <button type="button" class="metric-box kpi-filter-card kpi-bugs" data-kpi-filter="BUGS" aria-pressed="false">
             <span class="metric-label">Open Bugs</span>
             <span class="metric-value" id="count-open-bugs">${summary.open_bug_reports}</span>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -237,7 +303,10 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
         <div class="coil-metrics-row">
           <div class="metric-box status-working">
             <span class="metric-label">Auto-Finished</span>
-            <span class="metric-value" id="coil-auto-finished">${defaultBucket.auto_finished_count}</span>
+            <div class="coil-value-row">
+              <span class="metric-value" id="coil-auto-finished">${defaultBucket.auto_finished_count}</span>
+              <span class="coil-rate-pill" id="coil-auto-rate">${autoRate}%</span>
+            </div>
           </div>
           <div class="metric-box status-idle">
             <span class="metric-label">Aborted</span>
@@ -259,11 +328,15 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
       <button type="button" role="tab" id="tab-map" data-tab="map" aria-selected="true" focusgroupstart>Floor Map</button>
       <button type="button" role="tab" id="tab-history" data-tab="history" aria-selected="false">Room History</button>
       <button type="button" role="tab" id="tab-glossary" data-tab="glossary" aria-selected="false">Master Glossary</button>
+      <button type="button" role="tab" id="tab-ota" data-tab="ota" aria-selected="false">Firmware &amp; Presets</button>
     </div>
 
     <div class="tabpanels-stack">
       <div role="tabpanel" id="panel-map" aria-labelledby="tab-map" tabindex="0">
         <div class="tabpanel-body">
+          ${renderRepeatFaultBannerHtml(history)}
+          ${renderTriageToolbarHtml(machines.length)}
+
           <div class="card filter-bar">
             <div class="filter-pills" role="group" aria-label="Filter floor map by status">
               ${filterStatePills
@@ -272,10 +345,13 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
                 )
                 .join('')}
             </div>
-            <span id="map-filter-status" class="machine-meta" aria-live="polite">Showing all ${machines.length} machines</span>
           </div>
 
-          ${renderWorkshopFloorPlan(machines)}
+          ${renderFloorBatchToolbarHtml(releases, presets)}
+          ${renderTriageBoardHtml(machines, history)}
+          <div id="fleet-blueprint-view" hidden>
+            ${renderWorkshopFloorPlan(machines)}
+          </div>
         </div>
       </div>
 
@@ -288,13 +364,6 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
                 <option value="all">All Faults &amp; Bug Reports</option>
                 <option value="errors">Fault Events Only</option>
                 <option value="bug_reports">Bug Reports Only</option>
-              </select>
-            </div>
-            <div class="control-field">
-              <label for="history-zone">Floor Zone</label>
-              <select id="history-zone" name="zone">
-                <option value="">All Zones</option>
-                ${FLOOR_ZONES.map((z) => `<option value="${escapeHtml(z)}">${escapeHtml(ZONE_META[z].title)}</option>`).join('')}
               </select>
             </div>
             <div class="control-field">
@@ -328,23 +397,38 @@ export function renderFleetDashboardPage(model: FleetPageViewModel): string {
           </ul>
         </div>
       </div>
+
+      ${renderOtaManagementTabPanelHtml(releases, presets, updates)}
     </div>
   </div>
 
   <dialog id="machine-drawer" class="machine-drawer" closedby="any" aria-labelledby="drawer-title">
     <div class="drawer-header">
       <h2 id="drawer-title">Machine Details</h2>
-      <form method="dialog">
-        <button type="submit" class="btn" autofocus>Close</button>
-      </form>
+      <div class="drawer-header-actions">
+        <button type="button" id="drawer-prev-error-btn" class="drawer-step-btn" title="Previous Error Machine (Left Arrow)" aria-label="Previous Error Machine">&lsaquo;</button>
+        <button type="button" id="drawer-next-error-btn" class="drawer-step-btn" title="Next Error Machine (Right Arrow)" aria-label="Next Error Machine">&rsaquo;</button>
+        <form method="dialog">
+          <button type="submit" class="btn" autofocus>Close</button>
+        </form>
+      </div>
+    </div>
+    <div class="drawer-hotkey-bar">
+      <span id="drawer-error-count">Use &larr; / &rarr; arrows to step through active errors</span>
+      <span>ESP32 Pico</span>
     </div>
     <div id="drawer-body" class="drawer-body">
       <p class="machine-meta">Select any machine on the floor map to inspect live diagnostics.</p>
     </div>
   </dialog>
 
+  ${renderGlossaryPopoverHtml()}
+
   <script type="application/json" id="fleet-bootstrap-data">${bootstrapPayload}</script>
   <script>${FLEET_CLIENT_SCRIPT}</script>
+  <script>${FLEET_OTA_CLIENT_SCRIPT}</script>
+  <script>${FLEET_DRAWER_CONTROLS_SCRIPT}</script>
+  <script>${FLEET_TRIAGE_CLIENT_SCRIPT}</script>
 </body>
 </html>`;
 }

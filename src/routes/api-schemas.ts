@@ -1,5 +1,10 @@
 import type { FastifyReply } from 'fastify';
-import { BUG_REPORT_TAGS, FLOOR_ZONES, MACHINE_STATES } from '../spec/mqtt-contract.js';
+import { PENDING_UPDATE_STATUSES } from '../services/pending-updates.js';
+import {
+  BUG_REPORT_TAGS,
+  COMMAND_TYPES,
+  MACHINE_STATES,
+} from '../spec/mqtt-contract.js';
 
 /**
  * Shared OpenAPI/JSON schema for standardized HTTP 404 machine-not-found responses.
@@ -37,19 +42,58 @@ export const machineRecordResponseSchema = {
     'zone',
     'grid_row',
     'grid_col',
+    'floor_position',
+    'hardware_id',
     'current_state',
     'active_error',
+    'fw_version',
+    'preset_version',
+    'preset_name',
     'last_seen_at',
   ],
   properties: {
     id: { type: 'string' },
     display_name: { type: 'string' },
-    zone: { type: 'string', enum: [...FLOOR_ZONES] },
+    zone: { type: 'string' },
     grid_row: { type: 'integer' },
     grid_col: { type: 'integer' },
+    floor_position: { type: 'integer', nullable: true },
+    hardware_id: { type: 'string', nullable: true },
     current_state: { type: 'string', enum: [...MACHINE_STATES] },
     active_error: { type: 'string', nullable: true },
+    fw_version: { type: 'string', nullable: true },
+    preset_version: { type: 'string', nullable: true },
+    preset_name: { type: 'string', nullable: true },
     last_seen_at: { type: 'string', format: 'date-time', nullable: true },
+  },
+} as const;
+
+/**
+ * Shared OpenAPI/JSON schema for queued/dispatched machine update records.
+ */
+export const pendingUpdateRecordResponseSchema = {
+  type: 'object',
+  required: [
+    'id',
+    'machine_id',
+    'update_type',
+    'target_version',
+    'target_name',
+    'status',
+    'created_at',
+    'dispatched_at',
+    'cancelled_at',
+  ],
+  properties: {
+    id: { type: 'integer' },
+    machine_id: { type: 'string' },
+    update_type: { type: 'string', enum: [...COMMAND_TYPES] },
+    target_version: { type: 'string' },
+    target_name: { type: 'string', nullable: true },
+    status: { type: 'string', enum: [...PENDING_UPDATE_STATUSES] },
+    created_at: { type: 'string', format: 'date-time' },
+    dispatched_at: { type: 'string', format: 'date-time', nullable: true },
+    cancelled_at: { type: 'string', format: 'date-time', nullable: true },
   },
 } as const;
 

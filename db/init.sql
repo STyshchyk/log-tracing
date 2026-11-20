@@ -3,13 +3,146 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE TABLE IF NOT EXISTS machines (
   id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
-  zone TEXT NOT NULL CHECK (zone IN ('NORTH_LEFT', 'NORTH_RIGHT', 'MAIN_BANK', 'EAST_DOOR')),
-  grid_row INTEGER NOT NULL,
-  grid_col INTEGER NOT NULL,
+  zone TEXT NOT NULL DEFAULT 'FLOOR',
+  grid_row INTEGER NOT NULL DEFAULT 1,
+  grid_col INTEGER NOT NULL DEFAULT 1,
+  floor_position INTEGER NULL CONSTRAINT machines_floor_position_positive_check CHECK (floor_position IS NULL OR floor_position > 0),
+  hardware_id TEXT NULL,
   current_state TEXT NOT NULL DEFAULT 'OFFLINE' CHECK (current_state IN ('WORKING', 'IDLE', 'ERROR', 'OFFLINE')),
   active_error TEXT NULL,
+  fw_version TEXT NULL,
+  preset_version TEXT NULL,
+  preset_name TEXT NULL,
   last_seen_at TIMESTAMPTZ NULL
 );
+
+DO $$
+DECLARE
+  legacy_zone_constraint TEXT;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'fw_version'
+  ) THEN
+    ALTER TABLE machines
+      ADD COLUMN fw_version TEXT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'preset_version'
+  ) THEN
+    ALTER TABLE machines
+      ADD COLUMN preset_version TEXT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'preset_name'
+  ) THEN
+    ALTER TABLE machines
+      ADD COLUMN preset_name TEXT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'floor_position'
+  ) THEN
+    ALTER TABLE machines
+      ADD COLUMN floor_position INTEGER NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'hardware_id'
+  ) THEN
+    ALTER TABLE machines
+      ADD COLUMN hardware_id TEXT NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = current_schema()
+      AND t.relname = 'machines'
+      AND c.conname = 'machines_floor_position_positive_check'
+  ) THEN
+    ALTER TABLE machines
+      ADD CONSTRAINT machines_floor_position_positive_check
+      CHECK (floor_position IS NULL OR floor_position > 0);
+  END IF;
+
+  FOR legacy_zone_constraint IN
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = current_schema()
+      AND t.relname = 'machines'
+      AND c.contype = 'c'
+      AND pg_get_constraintdef(c.oid) ILIKE '%NORTH_LEFT%'
+  LOOP
+    EXECUTE format('ALTER TABLE machines DROP CONSTRAINT IF EXISTS %I', legacy_zone_constraint);
+  END LOOP;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'zone'
+      AND column_default IS NULL
+  ) THEN
+    ALTER TABLE machines ALTER COLUMN zone SET DEFAULT 'FLOOR';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'grid_row'
+      AND column_default IS NULL
+  ) THEN
+    ALTER TABLE machines ALTER COLUMN grid_row SET DEFAULT 1;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'machines'
+      AND column_name = 'grid_col'
+      AND column_default IS NULL
+  ) THEN
+    ALTER TABLE machines ALTER COLUMN grid_col SET DEFAULT 1;
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_machines_hardware_id
+  ON machines (hardware_id)
+  WHERE hardware_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_machines_floor_position
+  ON machines (floor_position)
+  WHERE floor_position IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS telemetry_events (
   time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -194,3 +327,50 @@ CREATE TABLE IF NOT EXISTS bug_reports (
   status TEXT NOT NULL DEFAULT 'OPEN',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS firmware_releases (
+  id BIGSERIAL PRIMARY KEY,
+  version TEXT NOT NULL UNIQUE,
+  filename TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  sha256 TEXT NOT NULL CHECK (sha256 ~ '^[a-f0-9]{64}$'),
+  size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+  notes TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_firmware_releases_created_at
+  ON firmware_releases (created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS pending_updates (
+  id BIGSERIAL PRIMARY KEY,
+  machine_id TEXT NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  update_type TEXT NOT NULL CHECK (update_type IN ('OTA_UPDATE', 'APPLY_PRESET')),
+  target_version TEXT NOT NULL,
+  target_name TEXT NULL,
+  payload_json JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'DISPATCHED', 'CANCELLED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  dispatched_at TIMESTAMPTZ NULL,
+  cancelled_at TIMESTAMPTZ NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_updates_machine_status
+  ON pending_updates (machine_id, status, created_at ASC, id ASC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_updates_active_machine_type
+  ON pending_updates (machine_id, update_type)
+  WHERE status = 'PENDING';
+
+CREATE TABLE IF NOT EXISTS machine_presets (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  version TEXT NOT NULL,
+  config_json JSONB NOT NULL,
+  notes TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_machine_presets_name_version UNIQUE (name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_machine_presets_created_at
+  ON machine_presets (created_at DESC, id DESC);

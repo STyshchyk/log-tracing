@@ -1,8 +1,5 @@
 import type { Pool } from 'pg';
-import type {
-  FloorZone,
-  MachineState,
-} from '../spec/mqtt-contract.js';
+import type { MachineState } from '../spec/mqtt-contract.js';
 import { listBugReports, type BugReportRecord } from './bug-reports.js';
 import { getMachineCoilRollups, getRoomCoilRollups, type CoilRollupCounts } from './coil-rollups.js';
 import {
@@ -22,6 +19,7 @@ import {
   type MachineRecord,
   type MachineRow,
 } from './machines.js';
+import { listPendingUpdates, type PendingUpdateRecord } from './pending-updates.js';
 import {
   listRecentErrorSummaries,
   type RecentErrorSummary,
@@ -63,7 +61,7 @@ export interface FleetSummaryResult {
  */
 export interface ListFleetMachinesFilters {
   state?: MachineState | undefined;
-  zone?: FloorZone | undefined;
+  zone?: string | undefined;
 }
 
 /**
@@ -75,6 +73,7 @@ export interface FleetMachineDetailsResult {
   recent_errors: RecentErrorSummary[];
   recent_bug_reports: BugReportRecord[];
   coil_rollups: CoilRollupCounts[];
+  pending_updates: PendingUpdateRecord[];
   worker_portal_url: string;
 }
 
@@ -96,14 +95,6 @@ interface ActiveGlossaryRow {
 }
 
 const DETAILS_LIST_LIMIT = 5;
-
-const ZONE_ORDER_SQL = `CASE zone
-  WHEN 'NORTH_LEFT' THEN 1
-  WHEN 'NORTH_RIGHT' THEN 2
-  WHEN 'MAIN_BANK' THEN 3
-  WHEN 'EAST_DOOR' THEN 4
-  ELSE 5
-END ASC`;
 
 /**
  * Aggregate room-wide machine state counts, open bug report totals, and coil rollups.
@@ -148,8 +139,8 @@ export async function getFleetSummary(db: Pool): Promise<FleetSummaryResult> {
 }
 
 /**
- * List winding machines ordered deterministically by floor zone and grid coordinates,
- * with optional state and floor-zone filters.
+ * List winding machines ordered deterministically by physical floor position then machine ID,
+ * with optional state and legacy zone filters.
  */
 export async function listFleetMachines(
   db: Pool,
@@ -172,7 +163,7 @@ export async function listFleetMachines(
     `SELECT ${MACHINE_COLUMNS}
      FROM machines
      ${whereClause}
-     ORDER BY ${ZONE_ORDER_SQL}, grid_row ASC, grid_col ASC, id ASC`,
+     ORDER BY floor_position ASC NULLS LAST, id ASC`,
     params,
   );
 
@@ -180,8 +171,8 @@ export async function listFleetMachines(
 }
 
 /**
- * Fetch drill-down diagnostics, active glossary guidance, recent bug reports, and coil rollups
- * for a single registered machine. Returns null when the machine ID does not exist.
+ * Fetch drill-down diagnostics, active glossary guidance, recent bug reports, coil rollups,
+ * and pending OTA/preset updates for a single registered machine. Returns null when the machine ID does not exist.
  */
 export async function getFleetMachineDetails(
   db: Pool,
@@ -216,12 +207,14 @@ export async function getFleetMachineDetails(
         })
     : Promise.resolve(null);
 
-  const [activeGlossary, recentErrors, rollupsResult, bugReports] = await Promise.all([
-    activeGlossaryPromise,
-    listRecentErrorSummaries(db, machine.id, DETAILS_LIST_LIMIT),
-    getMachineCoilRollups(db, machine.id),
-    listBugReports(db, machine.id),
-  ]);
+  const [activeGlossary, recentErrors, rollupsResult, bugReports, pendingUpdates] =
+    await Promise.all([
+      activeGlossaryPromise,
+      listRecentErrorSummaries(db, machine.id, DETAILS_LIST_LIMIT),
+      getMachineCoilRollups(db, machine.id),
+      listBugReports(db, machine.id),
+      listPendingUpdates(db, { machineId: machine.id, status: 'PENDING' }),
+    ]);
 
   return {
     machine,
@@ -229,6 +222,7 @@ export async function getFleetMachineDetails(
     recent_errors: recentErrors,
     recent_bug_reports: (bugReports ?? []).slice(0, DETAILS_LIST_LIMIT),
     coil_rollups: rollupsResult?.rollups ?? [],
+    pending_updates: pendingUpdates,
     worker_portal_url: `/m/${encodeURIComponent(machine.id)}`,
   };
 }

@@ -2,7 +2,6 @@ import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import type { FloorZone } from '../spec/mqtt-contract.js';
 import { createDbPool, ensureSchema } from './pool.js';
 import { seedGlossary } from './seed-glossary.js';
 
@@ -10,35 +9,99 @@ const DEFAULT_DATABASE_URL =
   'postgresql://telemetry:telemetry@localhost:5432/telemetry';
 
 /**
- * Static registration and floor-layout metadata for a seeded winding machine.
+ * Static physical floor-position registration and optional initial ESP32 hardware assignment.
  */
 export interface PilotMachineSeed {
   id: string;
   display_name: string;
-  zone: FloorZone;
-  grid_row: number;
-  grid_col: number;
+  floor_position: number;
+  hardware_id?: string | null;
 }
 
 /**
- * Canonical Phase 1 pilot winding machines mounted in the north-left shop-floor bay.
+ * Outcome counts from an idempotent machine seed upsert.
+ */
+export interface MachineSeedCounts {
+  total: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+}
+
+/**
+ * Canonical Phase 1 pilot winding positions mounted at floor slots #1 and #2.
  */
 export const PILOT_MACHINES: readonly PilotMachineSeed[] = [
   {
     id: 'W-01',
     display_name: 'Winder 01',
-    zone: 'NORTH_LEFT',
-    grid_row: 1,
-    grid_col: 1,
+    floor_position: 1,
+    hardware_id: null,
   },
   {
     id: 'W-02',
     display_name: 'Winder 02',
-    zone: 'NORTH_LEFT',
-    grid_row: 1,
-    grid_col: 2,
+    floor_position: 2,
+    hardware_id: null,
   },
 ] as const;
+
+/**
+ * Idempotently upsert machine positions without altering live telemetry (`current_state`,
+ * `active_error`, `fw_version`, `preset_version`, `preset_name`, or `last_seen_at`) and without
+ * overwriting an already-assigned `hardware_id` when the seed leaves it empty.
+ */
+export async function upsertSeedMachines(
+  db: Pool,
+  machines: readonly PilotMachineSeed[],
+): Promise<MachineSeedCounts> {
+  if (machines.length === 0) {
+    return { total: 0, inserted: 0, updated: 0, unchanged: 0 };
+  }
+
+  const sorted = [...machines].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  const ids = sorted.map((machine) => machine.id);
+  const displayNames = sorted.map((machine) => machine.display_name);
+  const floorPositions = sorted.map((machine) => machine.floor_position);
+  const hardwareIds = sorted.map((machine) => machine.hardware_id ?? null);
+
+  const upsertResult = await db.query<{ inserted: boolean }>(
+    `INSERT INTO machines (id, display_name, floor_position, hardware_id)
+     SELECT * FROM UNNEST($1::text[], $2::text[], $3::integer[], $4::text[])
+     ON CONFLICT (id) DO UPDATE
+     SET
+       display_name = EXCLUDED.display_name,
+       zone = 'FLOOR',
+       floor_position = EXCLUDED.floor_position,
+       hardware_id = COALESCE(machines.hardware_id, EXCLUDED.hardware_id)
+     WHERE
+       machines.display_name IS DISTINCT FROM EXCLUDED.display_name
+       OR machines.zone IS DISTINCT FROM 'FLOOR'
+       OR machines.floor_position IS DISTINCT FROM EXCLUDED.floor_position
+       OR (machines.hardware_id IS NULL AND EXCLUDED.hardware_id IS NOT NULL)
+     RETURNING (xmax = 0) AS inserted`,
+    [ids, displayNames, floorPositions, hardwareIds],
+  );
+
+  let inserted = 0;
+  let updated = 0;
+  for (const row of upsertResult.rows) {
+    if (row.inserted) {
+      inserted += 1;
+    } else {
+      updated += 1;
+    }
+  }
+
+  const total = sorted.length;
+  return {
+    total,
+    inserted,
+    updated,
+    unchanged: total - inserted - updated,
+  };
+}
 
 /**
  * Idempotently register or update pilot machine metadata without altering live telemetry
@@ -48,34 +111,7 @@ export async function seedPilotMachines(
   db: Pool,
   machines: readonly PilotMachineSeed[] = PILOT_MACHINES,
 ): Promise<void> {
-  if (machines.length === 0) {
-    return;
-  }
-
-  const sorted = [...machines].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-
-  const ids = sorted.map((machine) => machine.id);
-  const displayNames = sorted.map((machine) => machine.display_name);
-  const zones = sorted.map((machine) => machine.zone);
-  const gridRows = sorted.map((machine) => machine.grid_row);
-  const gridCols = sorted.map((machine) => machine.grid_col);
-
-  await db.query(
-    `INSERT INTO machines (id, display_name, zone, grid_row, grid_col)
-     SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::integer[], $5::integer[])
-     ON CONFLICT (id) DO UPDATE
-     SET
-       display_name = EXCLUDED.display_name,
-       zone = EXCLUDED.zone,
-       grid_row = EXCLUDED.grid_row,
-       grid_col = EXCLUDED.grid_col
-     WHERE
-       machines.display_name IS DISTINCT FROM EXCLUDED.display_name
-       OR machines.zone IS DISTINCT FROM EXCLUDED.zone
-       OR machines.grid_row IS DISTINCT FROM EXCLUDED.grid_row
-       OR machines.grid_col IS DISTINCT FROM EXCLUDED.grid_col`,
-    [ids, displayNames, zones, gridRows, gridCols],
-  );
+  await upsertSeedMachines(db, machines);
 }
 
 /**

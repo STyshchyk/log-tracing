@@ -78,8 +78,13 @@ describe('live machine status ingestion and machine status API', () => {
       zone: 'MAIN_BANK',
       grid_row: 3,
       grid_col: 4,
+      floor_position: null,
+      hardware_id: null,
       current_state: 'OFFLINE',
       active_error: null,
+      fw_version: null,
+      preset_version: null,
+      preset_name: null,
       last_seen_at: null,
     });
 
@@ -314,6 +319,79 @@ describe('live machine status ingestion and machine status API', () => {
     ).toMatchObject({
       current_state: 'OFFLINE',
       active_error: null,
+    });
+  });
+
+  it('persists fw_version, preset_version, and preset_name on status messages, preserves them when omitted, and clears them on explicit null', async () => {
+    const machineId = makeMachineId('VER');
+    await registerMachine(machineId, { current_state: 'OFFLINE' });
+
+    await ctx.mqtt.emit(
+      `factory/winders/${machineId}/status`,
+      JSON.stringify({
+        state: 'IDLE',
+        fw_version: '1.2.0',
+        preset_version: '2026.11.1',
+        preset_name: 'fiberglass-standard',
+      }),
+    );
+
+    const afterInitial = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/machines/${machineId}`,
+    });
+    expect(afterInitial.statusCode).toBe(200);
+    expect(afterInitial.json()).toMatchObject({
+      current_state: 'IDLE',
+      fw_version: '1.2.0',
+      preset_version: '2026.11.1',
+      preset_name: 'fiberglass-standard',
+    });
+
+    // Minimal WORKING and LWT OFFLINE omit version fields and must preserve them
+    await ctx.mqtt.emit(`factory/winders/${machineId}/status`, JSON.stringify({ state: 'WORKING' }));
+    const afterWorking = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/machines/${machineId}`,
+    });
+    expect(afterWorking.json()).toMatchObject({
+      current_state: 'WORKING',
+      fw_version: '1.2.0',
+      preset_version: '2026.11.1',
+      preset_name: 'fiberglass-standard',
+    });
+
+    await ctx.mqtt.emit(`factory/winders/${machineId}/status`, JSON.stringify({ state: 'OFFLINE' }));
+    const afterLwt = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/machines/${machineId}`,
+    });
+    expect(afterLwt.json()).toMatchObject({
+      current_state: 'OFFLINE',
+      fw_version: '1.2.0',
+      preset_version: '2026.11.1',
+      preset_name: 'fiberglass-standard',
+    });
+
+    // Explicit null clears version/name fields while preserving omitted ones
+    await ctx.mqtt.emit(
+      `factory/winders/${machineId}/status`,
+      JSON.stringify({
+        state: 'IDLE',
+        fw_version: '1.3.0',
+        preset_version: null,
+        preset_name: null,
+      }),
+    );
+    const afterUpdate = await ctx.app.inject({
+      method: 'GET',
+      url: `/api/machines/${machineId}`,
+    });
+    expect(afterUpdate.json()).toMatchObject({
+      current_state: 'IDLE',
+      fw_version: '1.3.0',
+      preset_version: null,
+      preset_name: null,
     });
   });
 

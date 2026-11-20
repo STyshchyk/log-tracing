@@ -1,6 +1,6 @@
 # Phase 4 — Firmware OTA, Preset Management & Device Lifecycle
 
-> Triage label: `ready-for-agent`
+> Triage label: `done`
 
 ## Problem Statement
 

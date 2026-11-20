@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `spec/MQTT_TOPICS.md` documents optional `fw_version`, `preset_version`, and `preset_name` fields in `factory/winders/{id}/status`.
-- [ ] `spec/MQTT_TOPICS.md` defines `factory/winders/{id}/command` payloads for `OTA_UPDATE` (url, version, sha256) and `APPLY_PRESET` (version, config).
-- [ ] `spec/ESP32_INTEGRATION.md` specifies dual-OTA partition layout and automatic rollback if MQTT fails to reconnect within ~60s after reboot.
-- [ ] `spec/ESP32_INTEGRATION.md` documents idle-only execution guardrails on the ESP32 side.
+- [x] `spec/MQTT_TOPICS.md` documents optional `fw_version`, `preset_version`, and `preset_name` fields in `factory/winders/{id}/status`.
+- [x] `spec/MQTT_TOPICS.md` defines `factory/winders/{id}/command` payloads for `OTA_UPDATE` (url, version, sha256) and `APPLY_PRESET` (version, config).
+- [x] `spec/ESP32_INTEGRATION.md` specifies dual-OTA partition layout and automatic rollback if MQTT fails to reconnect within ~60s after reboot.
+- [x] `spec/ESP32_INTEGRATION.md` documents idle-only execution guardrails on the ESP32 side.

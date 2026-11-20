@@ -56,7 +56,7 @@ describe('Cloudflare Access authentication middleware & Worker Portal isolation'
 
     const htmlRes = await ctx.app.inject({ method: 'GET', url: '/fleet' });
     expect(htmlRes.statusCode).toBe(200);
-    expect(htmlRes.body).toContain('Local LAN Mode (Cloudflare Access disabled)');
+    expect(htmlRes.body).toContain('Factory Workshop Local Console (LAN Zero-Login)');
 
     const apiRes = await ctx.app.inject({ method: 'GET', url: '/api/fleet/summary' });
     expect(apiRes.statusCode).toBe(200);
@@ -212,7 +212,7 @@ describe('Cloudflare Access authentication middleware & Worker Portal isolation'
       headers: { 'cf-access-jwt-assertion': validJwt },
     });
     expect(okHtmlRes.statusCode).toBe(200);
-    expect(okHtmlRes.body).toContain('Signed in as head@factory.local');
+    expect(okHtmlRes.body).toContain('Authenticated as head@factory.local');
 
     // Accept valid CF_Authorization cookie
     const cookieRes = await ctx.app.inject({

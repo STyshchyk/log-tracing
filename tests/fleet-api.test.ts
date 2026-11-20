@@ -37,9 +37,11 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
     id: string,
     overrides: Partial<{
       display_name: string;
-      zone: 'NORTH_LEFT' | 'NORTH_RIGHT' | 'MAIN_BANK' | 'EAST_DOOR';
+      zone: string;
       grid_row: number;
       grid_col: number;
+      floor_position: number | null;
+      hardware_id: string | null;
       current_state: 'WORKING' | 'IDLE' | 'ERROR' | 'OFFLINE';
       active_error: string | null;
       last_seen_at: Date | null;
@@ -47,14 +49,16 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
   ): Promise<void> {
     createdMachineIds.push(id);
     await ctx.db.query(
-      `INSERT INTO machines (id, display_name, zone, grid_row, grid_col, current_state, active_error, last_seen_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      `INSERT INTO machines (id, display_name, zone, grid_row, grid_col, floor_position, hardware_id, current_state, active_error, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         id,
         overrides.display_name ?? `Winder ${id}`,
-        overrides.zone ?? 'NORTH_LEFT',
+        overrides.zone ?? 'FLOOR',
         overrides.grid_row ?? 1,
         overrides.grid_col ?? 1,
+        overrides.floor_position ?? null,
+        overrides.hardware_id ?? null,
         overrides.current_state ?? 'OFFLINE',
         overrides.active_error ?? null,
         overrides.last_seen_at ?? null,
@@ -132,28 +136,26 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
     expect(month!.total_wound_length).toBeLessThanOrEqual(allTime!.total_wound_length);
   });
 
-  it('GET /api/fleet/machines filters by state and zone and preserves deterministic ordering', async () => {
-    const idEast = makeMachineId('ORD-E');
-    const idMain = makeMachineId('ORD-M');
-    const idNorth = makeMachineId('ORD-N');
+  it('GET /api/fleet/machines filters by state and zone and preserves deterministic floor_position ordering', async () => {
+    const basePos = 200_000 + Math.floor(Math.random() * 500_000);
+    const idThird = makeMachineId('ORD-3');
+    const idSecond = makeMachineId('ORD-2');
+    const idFirst = makeMachineId('ORD-1');
 
-    await registerMachine(idEast, {
+    await registerMachine(idThird, {
       zone: 'EAST_DOOR',
-      grid_row: 1,
-      grid_col: 1,
+      floor_position: basePos + 3,
       current_state: 'ERROR',
       active_error: 'ERR_BOBBIN_JAM',
     });
-    await registerMachine(idMain, {
+    await registerMachine(idSecond, {
       zone: 'MAIN_BANK',
-      grid_row: 2,
-      grid_col: 1,
+      floor_position: basePos + 2,
       current_state: 'WORKING',
     });
-    await registerMachine(idNorth, {
+    await registerMachine(idFirst, {
       zone: 'NORTH_LEFT',
-      grid_row: 1,
-      grid_col: 2,
+      floor_position: basePos + 1,
       current_state: 'ERROR',
       active_error: 'ERR_FIBER_SNAP',
     });
@@ -162,9 +164,9 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
     expect(allRes.statusCode).toBe(200);
     const allBody = allRes.json<{ total: number; machines: MachineRecord[] }>();
     const ours = allBody.machines.filter((m) =>
-      [idEast, idMain, idNorth].includes(m.id),
+      [idThird, idSecond, idFirst].includes(m.id),
     );
-    expect(ours.map((m) => m.id)).toEqual([idNorth, idMain, idEast]);
+    expect(ours.map((m) => m.id)).toEqual([idFirst, idSecond, idThird]);
 
     const errorRes = await ctx.app.inject({
       method: 'GET',
@@ -174,9 +176,9 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
     const errorIds = errorRes
       .json<{ machines: MachineRecord[] }>()
       .machines.map((m) => m.id);
-    expect(errorIds).toContain(idNorth);
-    expect(errorIds).toContain(idEast);
-    expect(errorIds).not.toContain(idMain);
+    expect(errorIds).toContain(idFirst);
+    expect(errorIds).toContain(idThird);
+    expect(errorIds).not.toContain(idSecond);
 
     const zoneRes = await ctx.app.inject({
       method: 'GET',
@@ -186,8 +188,8 @@ describe('Phase 2 Fleet JSON APIs against real PostgreSQL/TimescaleDB', () => {
     const zoneIds = zoneRes
       .json<{ machines: MachineRecord[] }>()
       .machines.map((m) => m.id);
-    expect(zoneIds).toContain(idMain);
-    expect(zoneIds).not.toContain(idNorth);
+    expect(zoneIds).toContain(idSecond);
+    expect(zoneIds).not.toContain(idFirst);
 
     const invalidRes = await ctx.app.inject({
       method: 'GET',

@@ -7,9 +7,9 @@ Implementation guide for wiring ESP32 Pico winding-machine firmware to the Facto
 ## 1. Architectural Invariants (Non-Negotiable)
 
 1. **Never block real-time winding control or ISRs:**
-   - Winding motion control (spindle PWM/DAC, stepper pulses, tension ADC control loop, encoder/limit ISRs) runs on **Core 1 (`APP_CPU`)** and MUST NEVER perform Wi-Fi calls, TCP socket writes, DNS lookups, LittleFS flash writes, or dynamic heap allocations.
+   - Winding motion control (spindle PWM/DAC, stepper pulses, tension ADC control loop, encoder/limit ISRs) runs on **Core 1 (`APP_CPU`)** and MUST NEVER perform Wi-Fi calls, TCP socket writes, DNS lookups, LittleFS/OTA flash writes, or dynamic heap allocations.
 2. **Isolate MQTT & networking to a low-priority Core 0 task:**
-   - All MQTT connection management, JSON formatting, ring-buffer persistence, and `publish()` calls run inside a dedicated **low-priority FreeRTOS task pinned to Core 0 (`PRO_CPU`)**.
+   - All MQTT connection management, command handling, LAN HTTP OTA streaming, JSON formatting, ring-buffer persistence, and `publish()` calls run inside a dedicated **low-priority FreeRTOS task pinned to Core 0 (`PRO_CPU`)**.
 3. **Absorb Wi-Fi dropouts with a bounded ring-buffer:**
    - Factory Wi-Fi drops and AP switches must never drop fault/coil records or panic the MCU. Buffer outbound telemetry in a **bounded RAM or LittleFS ring-buffer** with deterministic overwrite rules.
 4. **Strictly `< 1 KB` (`< 1024` UTF-8 bytes) payloads with zero heap fragmentation:**
@@ -21,8 +21,8 @@ Implementation guide for wiring ESP32 Pico winding-machine firmware to the Facto
 
 | Core | Responsibility | FreeRTOS Priority | Rules |
 | :--- | :--- | :--- | :--- |
-| **Core 1** (`APP_CPU`) | Winding state machine, stepper/spindle control, tension PID, encoder/fault ISRs | High (e.g., `5`–`10` + hardware ISRs) | Enqueue fixed-size POD structs via `xQueueSend(..., 0)` or `xQueueSendFromISR(...)`. Zero blocking, zero `malloc`, zero flash/network I/O. |
-| **Core 0** (`PRO_CPU`) | Wi-Fi/LwIP stack (IDF internal), MQTT client, **Telemetry Publisher Task** | Low (`1`–`2`) | Drains FreeRTOS queue, spills to bounded ring-buffer when offline, formats `< 1024` B JSON, publishes to Mosquitto, yields regularly so `IDLE0` feeds Task Watchdog (`TWDT`). |
+| **Core 1** (`APP_CPU`) | Winding state machine, stepper/spindle control, tension PID, encoder/fault ISRs | High (e.g., `5`–`10` + hardware ISRs) | Enqueue fixed-size POD structs via `xQueueSend(..., 0)` or `xQueueSendFromISR(...)`. Zero blocking, zero `malloc`, zero flash/network I/O. Exposes an idle-only maintenance/update interlock (`IDLE`/`ERROR` only). |
+| **Core 0** (`PRO_CPU`) | Wi-Fi/LwIP stack (IDF internal), MQTT client, **Telemetry Publisher Task**, OTA/Preset handler | Low (`1`–`2`) | Drains FreeRTOS queue, spills to bounded ring-buffer when offline, formats `< 1024` B JSON, publishes to Mosquitto, subscribes to `factory/winders/{machineId}/command`, performs LAN HTTP OTA streaming/preset persistence only after Core 1 grants an idle-only update lock, and yields regularly so `IDLE0` feeds Task Watchdog (`TWDT`). |
 
 ### Non-Blocking Queue Contract
 
@@ -234,10 +234,12 @@ Configure Last Will & Testament at MQTT client initialization (before connecting
 ### Required Lifecycle Sequence
 
 1. **On `MQTT_EVENT_CONNECTED`:**
-   - Immediately publish retained `status` with the machine's actual current state (e.g., `{"state":"IDLE"}` or `{"state":"WORKING"}` or `{"state":"ERROR","error_code":"..."}`), `qos=1`, `retain=true`. This overwrites any LWT `OFFLINE` retained message on the broker.
+   - Subscribe to `factory/winders/{machineId}/command` (`qos=1`) so the unit can receive `OTA_UPDATE` and `APPLY_PRESET` commands.
+   - Immediately publish retained `status` with the machine's actual current state plus `fw_version`, `preset_version`, and `preset_name` (e.g., `{"state":"IDLE","fw_version":"1.2.0","preset_version":"2026.11.1","preset_name":"fiberglass-standard"}`), `qos=1`, `retain=true`. This overwrites any LWT `OFFLINE` retained message on the broker.
+   - If running an unconfirmed OTA image (`ESP_OTA_IMG_PENDING_VERIFY`), call `esp_ota_mark_app_valid_cancel_rollback()` only **after** this initial retained `status` publish is acknowledged (`MQTT_EVENT_PUBLISHED`).
    - Flush pending ring-buffer `events` and `coil` records (including the boot `BOOT` / `CRASH_RESET` event captured at startup).
 2. **On Cycle Start (`IDLE` -> `WORKING`):**
-   - Publish retained `status`: `{"state":"WORKING"}` (`retain=true`). Backend automatically clears any prior `active_error`.
+   - Publish retained `status`: `{"state":"WORKING"}` (`retain=true`). Backend automatically clears any prior `active_error` and preserves `fw_version` / `preset_version`.
 3. **On Cycle Automatic Finish (`WORKING` -> `IDLE`):**
    - Publish `coil`: `{"outcome":"AUTO_FINISHED","duration_sec":<elapsed_s>,"wound_length":<length>}` (`retain=false`, `qos=1`).
    - Publish retained `status`: `{"state":"IDLE"}` (`retain=true`).
@@ -274,7 +276,92 @@ When adding a new fault code in the future, add its entry to `spec/error_codes.j
 
 ---
 
-## 8. Pilot Verification Checklist (Local Stack)
+## 8. Firmware OTA Updates, Dual-Partition Rollback & Idle-Only Guardrails
+
+### Dual-OTA Partition Layout (`partitions.csv`)
+
+Enable bootloader app rollback in `sdkconfig` (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`) and configure two equal OTA app slots (`ota_0` and `ota_1`) plus `otadata` and `littlefs` for a 4 MB ESP32 Pico flash:
+
+```csv
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xE000,   0x2000,
+ota_0,    app,  ota_0,   0x10000,  0x1C0000,
+ota_1,    app,  ota_1,   0x1D0000, 0x1C0000,
+littlefs, data, spiffs,  0x390000, 0x70000,
+```
+
+Both `ota_0` and `ota_1` are `1.75 MB` (`0x1C0000`), leaving `0x400000` (`4 MB`) fully aligned.
+
+### Automatic Rollback (~60-Second Verification Window)
+
+A bad firmware image must never brick machines on the shop floor. On boot, inspect the running partition state via `esp_ota_get_state_partition(esp_ota_get_running_partition(), &ota_state)`:
+
+1. When `ota_state == ESP_OTA_IMG_PENDING_VERIFY`, start a **`60,000 ms` (60-second) verification deadline**.
+2. Keep the image unconfirmed until **all** confirmation gates pass:
+   - Core 1 control loop initialized cleanly (no early fault/hang).
+   - Wi-Fi STA obtained an IP address.
+   - MQTT connected (`MQTT_EVENT_CONNECTED`) and subscribed to `factory/winders/{machineId}/command`.
+   - Initial retained `status` payload (carrying the new `fw_version` and `preset_version`) received `MQTT_EVENT_PUBLISHED` from Mosquitto.
+3. Once confirmed within 60s, call `esp_ota_mark_app_valid_cancel_rollback()` and emit an `INFO` telemetry event confirming the new version.
+4. If the 60s deadline expires without confirmation, call `esp_ota_mark_app_invalid_rollback_and_reboot()` to fall back to the previous working OTA slot. Any unhandled panic, WDT reset, or brownout before confirmation also causes the bootloader to roll back automatically.
+
+```cpp
+#include "esp_ota_ops.h"
+
+static bool s_pending_ota_verify = false;
+static TickType_t s_boot_tick = 0;
+
+void ota_rollback_init() {
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
+      state == ESP_OTA_IMG_PENDING_VERIFY) {
+    s_pending_ota_verify = true;
+    s_boot_tick = xTaskGetTickCount();
+  }
+}
+
+void ota_rollback_on_status_published() {
+  if (!s_pending_ota_verify) return;
+  if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+    s_pending_ota_verify = false;
+  }
+}
+
+void ota_rollback_poll_timeout() {
+  if (!s_pending_ota_verify) return;
+  if ((xTaskGetTickCount() - s_boot_tick) >= pdMS_TO_TICKS(60000)) {
+    esp_ota_mark_app_invalid_rollback_and_reboot();
+  }
+}
+```
+
+### Idle-Only Execution Guardrails (Defense-in-Depth)
+
+Although the backend queues updates as `PENDING` while a machine is `WORKING` and dispatches only on `IDLE` or `ERROR`, the ESP32 MUST independently enforce idle-only execution:
+
+1. **Authoritative Core 1 State Check:** Before handling `OTA_UPDATE` or `APPLY_PRESET`, query Core 1's authoritative state. Proceed **only** when state is `IDLE` or `ERROR` (spindle stopped, all motion disabled). Immediately reject if `WORKING` — never abort or pause an active winding cycle.
+2. **Core 1 Maintenance Interlock:** Acquire an atomic `update_lock` flag shared with Core 1 before erasing/writing SPI flash (`.bin` OTA write or NVS/LittleFS preset commit) so the local touchscreen cannot start a winding cycle until flash writes finish or abort.
+3. **Structured Rejection / Progress Events:** Publish a concise `< 1024` B `DIAGNOSTIC` or `INFO` event on `factory/winders/{machineId}/events` when rejecting a command (`machine_working`, `sha256_mismatch`, `http_error`, `invalid_preset`) or staging/applying an update.
+4. **QoS 1 Idempotency:** Commands arrive at QoS `1` (`retain=false`). If the machine is already running the requested `fw_version` or `preset_version`, skip re-flashing/rewriting flash and immediately republish retained `status`.
+
+### LAN HTTP OTA Download & SHA-256 Verification
+
+1. Parse `OTA_UPDATE` (`version`, `url`, `sha256`). Reject immediately if already running `version`, if `sha256` is not 64 lowercase hex chars, or if Core 1 refuses the idle-only lock.
+2. Stream the binary over LAN HTTP (`esp_http_client`) in fixed `4 KB` stack/static chunks directly into `esp_ota_begin()` / `esp_ota_write()`, feeding every chunk into `mbedtls_sha256_update()`.
+3. On any HTTP status `!= 200`, read timeout, flash write error, or SHA-256 mismatch against `sha256`: call `esp_ota_abort()`, release the Core 1 interlock, emit a `DIAGNOSTIC` event (`"http_error"` or `"sha256_mismatch"`), and remain on the current firmware.
+4. Only when the full image downloads and the computed lowercase SHA-256 matches byte-for-byte: call `esp_ota_end()`, `esp_ota_set_boot_partition()`, emit an `INFO` event, and call `esp_restart()`.
+
+### Preset Application (`APPLY_PRESET`)
+
+1. Enforce the same Core 1 idle-only check (`IDLE` or `ERROR`) and maintenance interlock before applying `APPLY_PRESET`.
+2. Range-validate every expected key in `config` against mechanical/electrical safety limits before writing. Reject out-of-range or malformed payloads via a `DIAGNOSTIC` event (`"invalid_preset"`).
+3. Write the validated preset + `version` + `preset_name` atomically to NVS or LittleFS (`tmp` + `rename` or versioned NVS namespace), swap into Core 1's active preset struct while idle, release the interlock, emit an `INFO` event, and immediately republish retained `status` with updated `preset_version` and `preset_name`.
+
+---
+
+## 9. Pilot Verification Checklist (Local Stack)
 
 Before flashing onto shop-floor machines, verify a pilot ESP32 against the local Docker Compose stack (`docker compose up -d`):
 
@@ -282,8 +369,10 @@ Before flashing onto shop-floor machines, verify a pilot ESP32 against the local
    ```bash
    mosquitto_sub -h <server-lan-ip> -p 1883 -t 'factory/winders/#' -v
    ```
-2. **Boot & Diagnostics:** Power on ESP32; confirm retained `factory/winders/W-01/status` = `{"state":"IDLE"}` and `factory/winders/W-01/events` receives `BOOT` (or `CRASH_RESET`) with `reset_reason`, `rssi`, and `free_heap`.
+2. **Boot, Versions & Diagnostics:** Power on ESP32; confirm retained `factory/winders/W-01/status` includes `state`, `fw_version`, and `preset_version`, and `factory/winders/W-01/events` receives `BOOT` (or `CRASH_RESET`) with `reset_reason`, `rssi`, and `free_heap`.
 3. **Fault & Glossary Pinning:** Trigger a test fault (e.g., `ERR_FIBER_SNAP`); verify `GET http://<server-lan-ip>:3000/api/machines/W-01` shows `current_state: "ERROR"` and `active_error: "ERR_FIBER_SNAP"`, and `GET /m/W-01/glossary` pins `ERR_FIBER_SNAP` at the top.
 4. **Cycle Outcomes:** Emit `AUTO_FINISHED`, `ABORTED`, and `FAULT_TERMINATED` payloads with `duration_sec` and `wound_length`; confirm CRM statuses (`COMPLETED`, `REDO`) are rejected and valid payloads are `< 1024` bytes.
 5. **Wi-Fi Drop Ring-Buffer:** Disable AP / block Wi-Fi for 30 seconds while triggering events, restore Wi-Fi, and verify buffered events arrive in `GET /api/machines/W-01/events` without crashing or stalling Core 1.
 6. **LWT Offline Detection:** Unplug ESP32 USB/power cleanly without calling `disconnect()`; confirm within ~1.5x keepalive (`~30s`) Mosquitto publishes LWT `{"state":"OFFLINE"}` and `GET /m/W-01` shows `OFFLINE`.
+7. **Idle-Only OTA & Preset Guardrails:** While `W-01` is `WORKING`, send `OTA_UPDATE` and `APPLY_PRESET` on `factory/winders/W-01/command`; confirm Core 1 rejects them without interrupting winding (`DIAGNOSTIC` event emitted). Transition to `IDLE` and confirm `APPLY_PRESET` updates `preset_version` in retained `status`.
+8. **SHA-256 & 60s Automatic Rollback:** Send an `OTA_UPDATE` with an intentionally mismatched `sha256` and confirm the ESP32 aborts cleanly without rebooting. Then flash a test image configured to block MQTT for >60s and confirm the unit automatically rolls back to the prior working partition and reconnects with its previous `fw_version`.

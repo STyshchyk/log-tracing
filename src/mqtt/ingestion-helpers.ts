@@ -10,6 +10,21 @@ import type { MqttTransport } from './transport.js';
 const EPOCH_SECONDS_MIN = 1e9;
 const EPOCH_MILLISECONDS_MIN = 1e12;
 
+/**
+ * Build a SQL `WITH` clause that resolves a machine row's physical `id` from an incoming MQTT
+ * topic identifier, preferring an exact `hardware_id` match before falling back to `machines.id`.
+ */
+export function buildMatchedMachineCte(paramIndex: number): string {
+  const param = `$${paramIndex}::text`;
+  return `matched_machine AS (
+  SELECT id
+  FROM machines
+  WHERE hardware_id = ${param} OR id = ${param}
+  ORDER BY CASE WHEN hardware_id = ${param} THEN 0 ELSE 1 END
+  LIMIT 1
+)`;
+}
+
 const isoTimestampSchema = z.union([
   z.iso.datetime({ offset: true, local: true }),
   z.iso.date(),

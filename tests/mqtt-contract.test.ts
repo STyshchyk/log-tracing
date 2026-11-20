@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { loadFaultRegistry } from '../src/spec/fault-registry.js';
 import {
+  applyPresetCommandSchema,
   BUG_REPORT_TAGS,
+  buildWinderTopic,
   COIL_OUTCOMES,
   coilPayloadSchema,
+  COMMAND_TYPES,
+  commandPayloadSchema,
   ERROR_EVENT_TYPES,
   EVENT_TYPES,
   eventPayloadSchema,
@@ -11,16 +15,23 @@ import {
   isErrorEvent,
   MACHINE_STATES,
   MAX_MQTT_PAYLOAD_BYTES,
+  MQTT_CHANNELS,
   MQTT_TOPIC_PREFIX,
+  otaUpdateCommandSchema,
   parseMqttJsonPayload,
   parseWinderTopic,
+  serializeMqttJsonPayload,
+  SHA256_HEX_REGEX,
   statusPayloadSchema,
 } from '../src/spec/mqtt-contract.js';
 
 describe('mqtt contract', () => {
-  it('exposes canonical domain constants and parses valid winder topics while rejecting malformed ones', () => {
+  it('exposes canonical domain constants and parses/builds valid winder topics while rejecting malformed ones', () => {
     expect(MQTT_TOPIC_PREFIX).toBe('factory/winders');
     expect(MAX_MQTT_PAYLOAD_BYTES).toBe(1024);
+    expect(MQTT_CHANNELS).toEqual(['status', 'events', 'coil', 'command']);
+    expect(COMMAND_TYPES).toEqual(['OTA_UPDATE', 'APPLY_PRESET']);
+    expect(SHA256_HEX_REGEX.test('a'.repeat(64))).toBe(true);
     expect(MACHINE_STATES).toEqual(['WORKING', 'IDLE', 'ERROR', 'OFFLINE']);
     expect(EVENT_TYPES).toEqual([
       'ERROR',
@@ -49,10 +60,21 @@ describe('mqtt contract', () => {
       machineId: 'A',
       channel: 'coil',
     });
+    expect(parseWinderTopic('factory/winders/W-01/command')).toEqual({
+      machineId: 'W-01',
+      channel: 'command',
+    });
     expect(parseWinderTopic(`factory/winders/${'W'.repeat(64)}/status`)).toEqual({
       machineId: 'W'.repeat(64),
       channel: 'status',
     });
+
+    expect(buildWinderTopic('W-01', 'status')).toBe('factory/winders/W-01/status');
+    expect(buildWinderTopic('W-01', 'command')).toBe('factory/winders/W-01/command');
+    expect(() => buildWinderTopic('', 'command')).toThrow();
+    expect(() => buildWinderTopic('-W01', 'command')).toThrow();
+    expect(() => buildWinderTopic('W 01', 'command')).toThrow();
+    expect(() => buildWinderTopic('W-01', 'unknown' as never)).toThrow();
 
     const invalidTopics = [
       '',
@@ -75,10 +97,13 @@ describe('mqtt contract', () => {
     }
   });
 
-  it('validates status payloads, LWT OFFLINE shape, and strictly enforces < 1024 UTF-8 byte payloads', () => {
-    expect(parseMqttJsonPayload('{"state":"WORKING"}', statusPayloadSchema)).toEqual({
-      state: 'WORKING',
-    });
+  it('validates status payloads, optional firmware/preset version fields, LWT OFFLINE shape, and strictly enforces < 1024 UTF-8 byte payloads', () => {
+    const minimalWorking = parseMqttJsonPayload('{"state":"WORKING"}', statusPayloadSchema);
+    expect(minimalWorking).toEqual({ state: 'WORKING' });
+    expect('fw_version' in minimalWorking).toBe(false);
+    expect('preset_version' in minimalWorking).toBe(false);
+    expect('preset_name' in minimalWorking).toBe(false);
+
     expect(
       parseMqttJsonPayload(Buffer.from('{"state":"OFFLINE"}', 'utf8'), statusPayloadSchema),
     ).toEqual({
@@ -101,6 +126,38 @@ describe('mqtt contract', () => {
       error_code: null,
       ts: 1763553600,
     });
+    expect(
+      parseMqttJsonPayload(
+        JSON.stringify({
+          state: 'IDLE',
+          fw_version: '1.2.0',
+          preset_version: '2026.11.1',
+          preset_name: 'fiberglass-standard',
+        }),
+        statusPayloadSchema,
+      ),
+    ).toEqual({
+      state: 'IDLE',
+      fw_version: '1.2.0',
+      preset_version: '2026.11.1',
+      preset_name: 'fiberglass-standard',
+    });
+    expect(
+      parseMqttJsonPayload(
+        JSON.stringify({
+          state: 'IDLE',
+          fw_version: null,
+          preset_version: null,
+          preset_name: null,
+        }),
+        statusPayloadSchema,
+      ),
+    ).toEqual({
+      state: 'IDLE',
+      fw_version: null,
+      preset_version: null,
+      preset_name: null,
+    });
 
     // Strict UTF-8 byte length boundary: 1023 bytes succeeds, 1024 bytes fails (ASCII and multi-byte)
     const prefix = '{"state":"IDLE","ts":"';
@@ -122,7 +179,7 @@ describe('mqtt contract', () => {
     ).toThrow(/1024/);
     expect(() => parseMqttJsonPayload(multiByte1024, statusPayloadSchema)).toThrow(/1024/);
 
-    // Malformed JSON, invalid states, malformed error_code, extra keys, and bad ts
+    // Malformed JSON, invalid states, malformed error_code, bad version/name fields, extra keys, and bad ts
     for (const invalidPayload of [
       '',
       '{not json',
@@ -131,6 +188,16 @@ describe('mqtt contract', () => {
       '{"state":"ERROR","error_code":"err_lower"}',
       '{"state":"ERROR","error_code":"ERR__BAD"}',
       '{"state":"ERROR","error_code":""}',
+      '{"state":"IDLE","fw_version":""}',
+      '{"state":"IDLE","fw_version":"   "}',
+      JSON.stringify({ state: 'IDLE', fw_version: 'v'.repeat(65) }),
+      '{"state":"IDLE","fw_version":123}',
+      '{"state":"IDLE","preset_version":""}',
+      JSON.stringify({ state: 'IDLE', preset_version: 'p'.repeat(65) }),
+      '{"state":"IDLE","preset_version":true}',
+      '{"state":"IDLE","preset_name":"   "}',
+      JSON.stringify({ state: 'IDLE', preset_name: 'n'.repeat(65) }),
+      '{"state":"IDLE","preset_name":42}',
       '{"state":"WORKING","ts":"   "}',
       '{"state":"WORKING","ts":-5}',
       '{"state":"WORKING","extra":true}',
@@ -270,6 +337,187 @@ describe('mqtt contract', () => {
     ]) {
       expect(() => parseMqttJsonPayload(invalidCoil, coilPayloadSchema)).toThrow();
     }
+  });
+
+  it('validates OTA_UPDATE and APPLY_PRESET command payloads and rejects malformed or oversized commands', () => {
+    const validSha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+    const otaHttp = parseMqttJsonPayload(
+      JSON.stringify({
+        command: 'OTA_UPDATE',
+        version: '1.3.0',
+        url: 'http://192.168.1.50:3000/api/firmware/1.3.0/download',
+        sha256: validSha,
+      }),
+      commandPayloadSchema,
+    );
+    expect(otaHttp).toEqual({
+      command: 'OTA_UPDATE',
+      version: '1.3.0',
+      url: 'http://192.168.1.50:3000/api/firmware/1.3.0/download',
+      sha256: validSha,
+    });
+
+    const otaHttpsWithMeta = parseMqttJsonPayload(
+      JSON.stringify({
+        command: 'OTA_UPDATE',
+        version: '1.3.1-rc1',
+        url: 'https://fleet.factory.local/api/firmware/1.3.1-rc1/download',
+        sha256: validSha,
+        command_id: 'ota-w01-123',
+        ts: '2026-11-20T12:00:00Z',
+      }),
+      otaUpdateCommandSchema,
+    );
+    expect(otaHttpsWithMeta.command_id).toBe('ota-w01-123');
+
+    const presetFlat = parseMqttJsonPayload(
+      JSON.stringify({
+        command: 'APPLY_PRESET',
+        version: '2026.11.2',
+        config: {
+          target_rpm: 1450,
+          traverse_pitch_mm: 1.25,
+          enable_brake: true,
+          note: null,
+        },
+      }),
+      commandPayloadSchema,
+    );
+    expect(presetFlat).toEqual({
+      command: 'APPLY_PRESET',
+      version: '2026.11.2',
+      config: {
+        target_rpm: 1450,
+        traverse_pitch_mm: 1.25,
+        enable_brake: true,
+        note: null,
+      },
+    });
+
+    const presetNested = parseMqttJsonPayload(
+      JSON.stringify({
+        command: 'APPLY_PRESET',
+        version: '2026.11.3',
+        preset_name: 'fiberglass-2400',
+        config: {
+          stages: [600, 1200, 1450],
+          tension: { min_n: 12.0, max_n: 24.5 },
+        },
+        command_id: 'preset-w01-456',
+        ts: 1763640300,
+      }),
+      applyPresetCommandSchema,
+    );
+    expect(presetNested.preset_name).toBe('fiberglass-2400');
+
+    const oversizedOta = JSON.stringify({
+      command: 'OTA_UPDATE',
+      version: '1.3.0',
+      url: `http://192.168.1.50:3000/api/firmware/${'x'.repeat(920)}/download`,
+      sha256: validSha,
+    });
+    expect(Buffer.byteLength(oversizedOta, 'utf8')).toBeGreaterThanOrEqual(MAX_MQTT_PAYLOAD_BYTES);
+    expect(() => parseMqttJsonPayload(oversizedOta, commandPayloadSchema)).toThrow(/1024/);
+
+    const oversizedPreset = JSON.stringify({
+      command: 'APPLY_PRESET',
+      version: '2026.11.4',
+      config: { padding: 'z'.repeat(980) },
+    });
+    expect(Buffer.byteLength(oversizedPreset, 'utf8')).toBeGreaterThanOrEqual(
+      MAX_MQTT_PAYLOAD_BYTES,
+    );
+    expect(() => parseMqttJsonPayload(oversizedPreset, commandPayloadSchema)).toThrow(/1024/);
+
+    for (const invalidCommand of [
+      '{"command":"REBOOT"}',
+      JSON.stringify({ command: 'OTA_UPDATE', url: 'http://10.0.0.2/fw.bin', sha256: validSha }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '   ', url: 'http://10.0.0.2/fw.bin', sha256: validSha }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '1.0', url: 'ftp://10.0.0.2/fw.bin', sha256: validSha }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '1.0', url: 'http://10.0.0.2/fw bin', sha256: validSha }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '1.0', url: 'not-a-url', sha256: validSha }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '1.0', url: 'http://10.0.0.2/fw.bin', sha256: validSha.toUpperCase() }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '1.0', url: 'http://10.0.0.2/fw.bin', sha256: 'abc123' }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '1.0', url: 'http://10.0.0.2/fw.bin', sha256: 'g'.repeat(64) }),
+      JSON.stringify({ command: 'OTA_UPDATE', version: '1.0', url: 'http://10.0.0.2/fw.bin', sha256: validSha, extra: 1 }),
+      JSON.stringify({ command: 'APPLY_PRESET', version: '1.0', config: {} }),
+      JSON.stringify({ command: 'APPLY_PRESET', version: '1.0', config: ['not-an-object'] }),
+      JSON.stringify({ command: 'APPLY_PRESET', version: '1.0', config: { '': 1 } }),
+      '{"command":"APPLY_PRESET","version":"1.0","config":{"__proto__":1}}',
+      '{"command":"APPLY_PRESET","version":"1.0","config":{"constructor":1}}',
+      '{"command":"APPLY_PRESET","version":"1.0","config":{"prototype":{"a":1}}}',
+      JSON.stringify({ command: 'APPLY_PRESET', version: '1.0', config: { rpm: 1000 }, extra: true }),
+    ]) {
+      expect(() => parseMqttJsonPayload(invalidCommand, commandPayloadSchema)).toThrow();
+    }
+
+    expect(() =>
+      applyPresetCommandSchema.parse({
+        command: 'APPLY_PRESET',
+        version: '1.0',
+        config: { rpm: Number.POSITIVE_INFINITY },
+      }),
+    ).toThrow();
+  });
+
+  it('serializes validated commands via serializeMqttJsonPayload and enforces < 1024 UTF-8 bytes', () => {
+    const validSha = 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9';
+
+    const serializedOta = serializeMqttJsonPayload(
+      {
+        command: 'OTA_UPDATE',
+        version: '1.4.0',
+        url: 'http://192.168.1.50:3000/api/firmware/1.4.0/download',
+        sha256: validSha,
+      },
+      commandPayloadSchema,
+    );
+    expect(Buffer.byteLength(serializedOta, 'utf8')).toBeLessThan(MAX_MQTT_PAYLOAD_BYTES);
+    expect(parseMqttJsonPayload(serializedOta, commandPayloadSchema)).toMatchObject({
+      command: 'OTA_UPDATE',
+      version: '1.4.0',
+      sha256: validSha,
+    });
+
+    const serializedPreset = serializeMqttJsonPayload(
+      {
+        command: 'APPLY_PRESET',
+        version: '2026.11.5',
+        preset_name: 'heavy-core',
+        config: { target_rpm: 900, tension_n: 22.5 },
+      },
+      commandPayloadSchema,
+    );
+    expect(parseMqttJsonPayload(serializedPreset, commandPayloadSchema)).toMatchObject({
+      command: 'APPLY_PRESET',
+      version: '2026.11.5',
+      preset_name: 'heavy-core',
+    });
+
+    expect(() =>
+      serializeMqttJsonPayload(
+        {
+          command: 'OTA_UPDATE',
+          version: '1.4.0',
+          url: 'http://192.168.1.50:3000/fw.bin',
+          sha256: 'not-valid',
+        },
+        commandPayloadSchema,
+      ),
+    ).toThrow();
+
+    // Multi-byte UTF-8 boundary check: char count < 1024, UTF-8 bytes >= 1024
+    expect(() =>
+      serializeMqttJsonPayload(
+        {
+          command: 'APPLY_PRESET',
+          version: '1.0',
+          config: { note: 'é'.repeat(500) },
+        },
+        commandPayloadSchema,
+      ),
+    ).toThrow(/1024/);
   });
 
   it('accepts every error_code defined in spec/error_codes.json across status, events, and coil contracts', () => {

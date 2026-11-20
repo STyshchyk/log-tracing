@@ -4,9 +4,9 @@
 
 **Blocked by:** 03: Single-Machine & Multi-Select OTA Dispatch + Pending Queue
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `machine_presets` table stores named, versioned JSONB presets (`name`, `version`, `config_json`, `created_at`).
-- [ ] Authenticated `/api/fleet/presets` endpoints support creating, listing, and pushing presets to single or multi-selected machines.
-- [ ] Pushing a preset dispatches `APPLY_PRESET` over MQTT immediately on `IDLE`/`ERROR` or queues as `PENDING` on `WORKING`.
-- [ ] Integration tests cover preset CRUD, immediate push, and `WORKING → IDLE` queued push.
+- [x] `machine_presets` table stores named, versioned JSONB presets (`name`, `version`, `config_json`, `created_at`).
+- [x] Authenticated `/api/fleet/presets` endpoints support creating, listing, and pushing presets to single or multi-selected machines.
+- [x] Pushing a preset dispatches `APPLY_PRESET` over MQTT immediately on `IDLE`/`ERROR` or queues as `PENDING` on `WORKING`.
+- [x] Integration tests cover preset CRUD, immediate push, and `WORKING → IDLE` queued push.

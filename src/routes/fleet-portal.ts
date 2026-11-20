@@ -1,7 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
+import { listFirmwareReleases } from '../services/firmware.js';
 import { getFleetSummary, listFleetHistory, listFleetMachines } from '../services/fleet.js';
 import { queryGlossary } from '../services/glossary.js';
+import { listPendingUpdates } from '../services/pending-updates.js';
+import { listMachinePresets } from '../services/presets.js';
 import { renderFleetDashboardPage } from '../ui/fleet-layout.js';
 
 const MANIFEST_ICON_SVG =
@@ -31,12 +34,16 @@ const FLEET_MANIFEST = {
  */
 export function registerFleetPortal(app: FastifyInstance, db: Pool): void {
   const handleFleetDashboard = async (request: FastifyRequest, reply: FastifyReply) => {
-    const [summary, machines, history, glossaryResult] = await Promise.all([
-      getFleetSummary(db),
-      listFleetMachines(db),
-      listFleetHistory(db, { limit: 50 }),
-      queryGlossary(db, {}),
-    ]);
+    const [summary, machines, history, glossaryResult, releases, presets, updates] =
+      await Promise.all([
+        getFleetSummary(db),
+        listFleetMachines(db),
+        listFleetHistory(db, { limit: 50 }),
+        queryGlossary(db, {}),
+        listFirmwareReleases(db),
+        listMachinePresets(db),
+        listPendingUpdates(db, { limit: 50 }),
+      ]);
 
     const html = renderFleetDashboardPage({
       user: request.fleetUser ?? {
@@ -48,6 +55,9 @@ export function registerFleetPortal(app: FastifyInstance, db: Pool): void {
       machines,
       history,
       glossary: glossaryResult?.entries ?? [],
+      releases,
+      presets,
+      updates,
     });
 
     return reply.type('text/html; charset=utf-8').send(html);

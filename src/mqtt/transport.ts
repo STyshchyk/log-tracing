@@ -6,18 +6,38 @@ import mqtt, { type MqttClient } from 'mqtt';
 export type MqttMessageHandler = (topic: string, payload: Buffer) => Promise<void> | void;
 
 /**
+ * Options controlling MQTT message delivery semantics on publish.
+ */
+export interface MqttPublishOptions {
+  qos?: 0 | 1 | 2;
+  retain?: boolean;
+}
+
+/**
+ * Recorded message emitted via `InMemoryMqttTransport.publish` for test assertions.
+ */
+export interface PublishedMqttMessage {
+  topic: string;
+  payload: string;
+  options: Required<MqttPublishOptions>;
+}
+
+/**
  * Swappable MQTT transport seam (real Mosquitto in production, in-memory emitter in tests).
  */
 export interface MqttTransport {
   subscribe(topicFilter: string, handler: MqttMessageHandler): Promise<void>;
+  publish(topic: string, payload: string | Buffer, options?: MqttPublishOptions): Promise<void>;
   close(): Promise<void>;
 }
 
 /**
- * In-memory MQTT transport adapter with synchronous-awaitable message emission for tests.
+ * In-memory MQTT transport adapter with synchronous-awaitable message emission and publish capture for tests.
  */
 export interface InMemoryMqttTransport extends MqttTransport {
+  readonly published: readonly PublishedMqttMessage[];
   emit(topic: string, payload: string | Buffer): Promise<void>;
+  clearPublished(): void;
 }
 
 interface Subscription {
@@ -70,14 +90,38 @@ function createSubscriptionRegistry() {
  */
 export function createInMemoryMqttTransport(): InMemoryMqttTransport {
   const registry = createSubscriptionRegistry();
+  const published: PublishedMqttMessage[] = [];
   let closed = false;
 
   return {
+    published,
+
     async subscribe(topicFilter: string, handler: MqttMessageHandler): Promise<void> {
       if (closed) {
         throw new Error('Cannot subscribe on a closed in-memory MQTT transport');
       }
       registry.add(topicFilter, handler);
+    },
+
+    async publish(
+      topic: string,
+      payload: string | Buffer,
+      options?: MqttPublishOptions,
+    ): Promise<void> {
+      if (closed) {
+        throw new Error('Cannot publish on a closed in-memory MQTT transport');
+      }
+      const text = typeof payload === 'string' ? payload : payload.toString('utf8');
+      const buffer = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
+      published.push({
+        topic,
+        payload: text,
+        options: {
+          qos: options?.qos ?? 0,
+          retain: options?.retain ?? false,
+        },
+      });
+      await registry.dispatch(topic, buffer);
     },
 
     async emit(topic: string, payload: string | Buffer): Promise<void> {
@@ -86,6 +130,10 @@ export function createInMemoryMqttTransport(): InMemoryMqttTransport {
       }
       const buffer = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
       await registry.dispatch(topic, buffer);
+    },
+
+    clearPublished(): void {
+      published.length = 0;
     },
 
     async close(): Promise<void> {
@@ -123,6 +171,30 @@ export function createMosquittoTransport(brokerUrl: string): MqttTransport {
           registry.add(topicFilter, handler);
           resolve();
         });
+      });
+    },
+
+    async publish(
+      topic: string,
+      payload: string | Buffer,
+      options?: MqttPublishOptions,
+    ): Promise<void> {
+      await new Promise<void>((resolve, reject) => {
+        client.publish(
+          topic,
+          payload,
+          {
+            qos: options?.qos ?? 1,
+            retain: options?.retain ?? false,
+          },
+          (err) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve();
+          },
+        );
       });
     },
 

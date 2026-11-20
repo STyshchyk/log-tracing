@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { TelemetryEventMetadata } from '../services/telemetry-events.js';
 import { eventPayloadSchema, type EventPayload } from '../spec/mqtt-contract.js';
 import {
+  buildMatchedMachineCte,
   defaultMqttLogger,
   parseMqttTimestamp,
   subscribeWinderChannel,
@@ -69,10 +70,10 @@ export async function registerEventsIngestion(
       const metadata = buildPayloadMetadata(payload);
 
       const insertResult = await db.query(
-        `INSERT INTO telemetry_events (time, machine_id, event_type, error_code, payload_json)
-         SELECT $1, id, $2, $3, $4::jsonb
-         FROM machines
-         WHERE id = $5`,
+        `WITH ${buildMatchedMachineCte(5)}
+         INSERT INTO telemetry_events (time, machine_id, event_type, error_code, payload_json)
+         SELECT $1, matched_machine.id, $2, $3, $4::jsonb
+         FROM matched_machine`,
         [
           eventTime,
           payload.event_type,

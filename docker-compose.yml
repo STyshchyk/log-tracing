@@ -36,11 +36,15 @@ services:
         condition: service_healthy
       mosquitto:
         condition: service_started
+    volumes:
+      - firmware_data:/app/data/firmware
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-telemetry}:${POSTGRES_PASSWORD:-telemetry}@postgres:5432/${POSTGRES_DB:-telemetry}
       MQTT_URL: mqtt://mosquitto:1883
       HOST: 0.0.0.0
       PORT: 3000
+      FIRMWARE_STORAGE_DIR: /app/data/firmware
+      OTA_BASE_URL: ${OTA_BASE_URL:-}
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
       CF_ACCESS_ALLOWED_EMAILS: ${CF_ACCESS_ALLOWED_EMAILS:-}
@@ -98,3 +102,4 @@ volumes:
   pg_data:
   mosquitto_data:
   grafana_data:
+  firmware_data:

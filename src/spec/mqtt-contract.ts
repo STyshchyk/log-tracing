@@ -14,12 +14,27 @@ export const MAX_MQTT_PAYLOAD_BYTES = 1024;
 /**
  * Allowed per-machine MQTT channels under factory/winders/{machineId}/{channel}.
  */
-export const MQTT_CHANNELS = ['status', 'events', 'coil'] as const;
+export const MQTT_CHANNELS = ['status', 'events', 'coil', 'command'] as const;
 
 /**
  * Valid per-machine MQTT channel name.
  */
 export type MqttChannel = (typeof MQTT_CHANNELS)[number];
+
+/**
+ * Canonical server-to-device command types accepted on the command channel.
+ */
+export const COMMAND_TYPES = ['OTA_UPDATE', 'APPLY_PRESET'] as const;
+
+/**
+ * Valid server-to-device command type union.
+ */
+export type CommandType = (typeof COMMAND_TYPES)[number];
+
+/**
+ * Pattern matching a 64-character lowercase hexadecimal SHA-256 digest.
+ */
+export const SHA256_HEX_REGEX = /^[a-f0-9]{64}$/;
 
 /**
  * Canonical winding machine operational states.
@@ -103,8 +118,73 @@ export type FloorZone = (typeof FLOOR_ZONES)[number];
 
 const MACHINE_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const TOPIC_PREFIX_PARTS = MQTT_TOPIC_PREFIX.split('/');
+const FORBIDDEN_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const timestampSchema = z.union([nonEmptyText, z.number().finite().nonnegative()]);
+
+function boundedNonEmptyText(maxLen: number) {
+  return z
+    .string()
+    .max(maxLen, `String must be at most ${maxLen} characters`)
+    .refine((value) => value.trim().length > 0, 'String must not be empty or whitespace-only');
+}
+
+const httpUrlSchema = boundedNonEmptyText(512).refine((value) => {
+  if (value !== value.trim() || /\s/.test(value)) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}, 'URL must be a valid http:// or https:// URL without whitespace');
+
+const presetConfigKeySchema = z
+  .string()
+  .min(1, 'Preset config key must not be empty')
+  .refine((key) => !FORBIDDEN_CONFIG_KEYS.has(key), 'Forbidden preset config key');
+
+/**
+ * Recursive JSON value permitted inside machine preset configuration objects.
+ */
+export type PresetConfigValue =
+  | string
+  | number
+  | boolean
+  | null
+  | PresetConfigValue[]
+  | { [key: string]: PresetConfigValue };
+
+/**
+ * Recursive Zod schema for machine preset JSON configuration values.
+ */
+export const presetConfigValueSchema: z.ZodType<PresetConfigValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number().finite(),
+    z.boolean(),
+    z.null(),
+    z.array(presetConfigValueSchema),
+    z.record(presetConfigKeySchema, presetConfigValueSchema),
+  ]),
+);
+
+/**
+ * Schema for validated non-empty JSON preset configuration objects.
+ */
+export const presetConfigSchema = z
+  .record(presetConfigKeySchema, presetConfigValueSchema)
+  .refine(
+    (obj) => Object.keys(obj).length > 0,
+    'Preset config must be a non-empty JSON object',
+  );
+
+/**
+ * Validated machine preset configuration object.
+ */
+export type PresetConfig = z.infer<typeof presetConfigSchema>;
 
 /**
  * Schema for `factory/winders/{machineId}/status` payloads (including LWT `{"state":"OFFLINE"}`).
@@ -112,6 +192,9 @@ const timestampSchema = z.union([nonEmptyText, z.number().finite().nonnegative()
 export const statusPayloadSchema = z.strictObject({
   state: z.enum(MACHINE_STATES),
   error_code: errorCodeSchema.nullish(),
+  fw_version: boundedNonEmptyText(64).nullish(),
+  preset_version: boundedNonEmptyText(64).nullish(),
+  preset_name: boundedNonEmptyText(64).nullish(),
   ts: timestampSchema.optional(),
 });
 
@@ -161,6 +244,55 @@ export const coilPayloadSchema = z.strictObject({
 export type CoilPayload = z.infer<typeof coilPayloadSchema>;
 
 /**
+ * Schema for `OTA_UPDATE` command payloads published to `factory/winders/{machineId}/command`.
+ */
+export const otaUpdateCommandSchema = z.strictObject({
+  command: z.literal('OTA_UPDATE'),
+  version: boundedNonEmptyText(64),
+  url: httpUrlSchema,
+  sha256: z
+    .string()
+    .regex(SHA256_HEX_REGEX, 'sha256 must be a 64-character lowercase hex digest'),
+  command_id: boundedNonEmptyText(64).optional(),
+  ts: timestampSchema.optional(),
+});
+
+/**
+ * Validated OTA update command payload.
+ */
+export type OtaUpdateCommandPayload = z.infer<typeof otaUpdateCommandSchema>;
+
+/**
+ * Schema for `APPLY_PRESET` command payloads published to `factory/winders/{machineId}/command`.
+ */
+export const applyPresetCommandSchema = z.strictObject({
+  command: z.literal('APPLY_PRESET'),
+  version: boundedNonEmptyText(64),
+  preset_name: boundedNonEmptyText(64).optional(),
+  config: presetConfigSchema,
+  command_id: boundedNonEmptyText(64).optional(),
+  ts: timestampSchema.optional(),
+});
+
+/**
+ * Validated apply-preset command payload.
+ */
+export type ApplyPresetCommandPayload = z.infer<typeof applyPresetCommandSchema>;
+
+/**
+ * Discriminated union schema for `factory/winders/{machineId}/command` payloads.
+ */
+export const commandPayloadSchema = z.discriminatedUnion('command', [
+  otaUpdateCommandSchema,
+  applyPresetCommandSchema,
+]);
+
+/**
+ * Validated server-to-device command payload.
+ */
+export type CommandPayload = z.infer<typeof commandPayloadSchema>;
+
+/**
  * Return true when an event carries a fault `error_code` or has an error-class `event_type`.
  */
 export function isErrorEvent(
@@ -202,11 +334,46 @@ export function parseMqttJsonPayload<TSchema extends z.ZodType>(
 }
 
 /**
+ * Validate a payload against a Zod contract schema, serialize as JSON, and enforce UTF-8 byte length < 1024 bytes.
+ */
+export function serializeMqttJsonPayload<TSchema extends z.ZodType>(
+  payload: z.input<TSchema>,
+  schema: TSchema,
+): string {
+  const validated = schema.parse(payload);
+  const serialized = JSON.stringify(validated);
+  const byteLength = Buffer.byteLength(serialized, 'utf8');
+
+  if (byteLength >= MAX_MQTT_PAYLOAD_BYTES) {
+    throw new Error(
+      `MQTT payload byte length (${byteLength}) must be strictly less than ${MAX_MQTT_PAYLOAD_BYTES} bytes`,
+    );
+  }
+
+  return serialized;
+}
+
+/**
  * Parsed components of a valid winder MQTT topic.
  */
 export interface ParsedWinderTopic {
   machineId: string;
   channel: MqttChannel;
+}
+
+/**
+ * Build a validated winder MQTT topic matching `factory/winders/{machineId}/{channel}`.
+ */
+export function buildWinderTopic(machineId: string, channel: MqttChannel): string {
+  if (!machineId || !MACHINE_ID_REGEX.test(machineId)) {
+    throw new Error(`Invalid winder machineId for MQTT topic: ${machineId}`);
+  }
+
+  if (!channel || !(MQTT_CHANNELS as readonly string[]).includes(channel)) {
+    throw new Error(`Invalid MQTT channel for winder topic: ${String(channel)}`);
+  }
+
+  return `${MQTT_TOPIC_PREFIX}/${machineId}/${channel}`;
 }
 
 /**

@@ -15,13 +15,20 @@ import type { MqttTransport } from './mqtt/transport.js';
 import { registerBugReportsApi } from './routes/bug-reports-api.js';
 import { registerCoilsApi } from './routes/coils-api.js';
 import { registerEventsApi } from './routes/events-api.js';
+import {
+  registerFirmwareDownloadApi,
+  registerFleetFirmwareApi,
+} from './routes/firmware-api.js';
 import { registerFleetApi } from './routes/fleet-api.js';
 import { registerFleetPortal } from './routes/fleet-portal.js';
 import { registerGlossaryApi } from './routes/glossary-api.js';
 import { registerMachinesApi } from './routes/machines-api.js';
+import { registerFleetPresetsApi } from './routes/presets-api.js';
+import { registerFleetUpdatesApi } from './routes/updates-api.js';
 import { registerWorkerBugReport } from './routes/worker-bug-report.js';
 import { registerWorkerGlossary } from './routes/worker-glossary.js';
 import { registerWorkerPortal } from './routes/worker-portal.js';
+import { MAX_FIRMWARE_BYTES, resolveFirmwareStorageDir } from './services/firmware.js';
 
 /**
  * Top-level runtime dependencies injected at the application seam.
@@ -31,6 +38,8 @@ export interface AppDeps {
   mqtt: MqttTransport;
   logger?: boolean | FastifyServerOptions['logger'];
   fleetAuth?: CloudflareAccessConfig;
+  firmwareDir?: string;
+  otaBaseUrl?: string;
 }
 
 /**
@@ -39,6 +48,7 @@ export interface AppDeps {
 export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   await seedGlossary(deps.db);
 
+  const firmwareDir = resolveFirmwareStorageDir(deps.firmwareDir);
   const app = Fastify({ logger: deps.logger ?? true });
 
   app.addContentTypeParser(
@@ -59,6 +69,14 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
       } catch (err) {
         done(err instanceof Error ? err : new Error(String(err)), undefined);
       }
+    },
+  );
+
+  app.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer', bodyLimit: MAX_FIRMWARE_BYTES },
+    (_request, body, done) => {
+      done(null, Buffer.isBuffer(body) ? body : Buffer.from(body));
     },
   );
 
@@ -120,6 +138,7 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   registerEventsApi(app, deps.db);
   registerBugReportsApi(app, deps.db);
   registerCoilsApi(app, deps.db);
+  registerFirmwareDownloadApi(app, deps.db, firmwareDir);
   registerWorkerPortal(app, deps.db);
   registerWorkerGlossary(app, deps.db);
   registerWorkerBugReport(app, deps.db);
@@ -128,6 +147,9 @@ export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (fleetScope) => {
     fleetScope.addHook('preHandler', createFleetAuthPreHandler(fleetAuthConfig));
     registerFleetApi(fleetScope, deps.db);
+    registerFleetFirmwareApi(fleetScope, deps.db, firmwareDir);
+    registerFleetUpdatesApi(fleetScope, deps.db, deps.mqtt, deps.otaBaseUrl);
+    registerFleetPresetsApi(fleetScope, deps.db, deps.mqtt);
     registerFleetPortal(fleetScope, deps.db);
   });
 

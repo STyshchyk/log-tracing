@@ -74,24 +74,54 @@ describe('bootstrap seam (Fastify + real PostgreSQL/TimescaleDB)', () => {
       data_type: 'double precision',
     });
 
+    const machineColsRes = await ctx.db.query<{ column_name: string }>(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'machines'`,
+    );
+    expect(machineColsRes.rows.map((r) => r.column_name)).toEqual(
+      expect.arrayContaining(['floor_position', 'hardware_id']),
+    );
+
+    const posA = 900_000 + Math.floor(Math.random() * 50_000);
+    const hwId = `TEST-HW-${posA}`;
+
     await ctx.db.query(
-      `INSERT INTO machines (id, display_name, zone, grid_row, grid_col, current_state)
-       VALUES ('TEST-W-99', 'Test Winder', 'NORTH_LEFT', 1, 1, 'IDLE')
+      `INSERT INTO machines (id, display_name, floor_position, hardware_id, current_state)
+       VALUES ('TEST-W-99', 'Test Winder', $1, $2, 'IDLE')
        ON CONFLICT (id) DO NOTHING`,
+      [posA, hwId],
     );
 
     try {
       await expect(
         ctx.db.query(
-          `INSERT INTO machines (id, display_name, zone, grid_row, grid_col)
-           VALUES ('TEST-BAD-ZONE', 'Bad', 'INVALID_ZONE', 1, 1)`,
+          `INSERT INTO machines (id, display_name, floor_position)
+           VALUES ('TEST-BAD-POS', 'Bad Pos', 0)`,
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        ctx.db.query(
+          `INSERT INTO machines (id, display_name, floor_position)
+           VALUES ('TEST-DUP-POS', 'Dup Pos', $1)`,
+          [posA],
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        ctx.db.query(
+          `INSERT INTO machines (id, display_name, hardware_id)
+           VALUES ('TEST-DUP-HW', 'Dup HW', $1)`,
+          [hwId],
         ),
       ).rejects.toThrow();
 
       await expect(
         ctx.db.query(
           `INSERT INTO machines (id, display_name, zone, grid_row, grid_col, current_state)
-           VALUES ('TEST-BAD-STATE', 'Bad', 'MAIN_BANK', 1, 1, 'UNKNOWN')`,
+           VALUES ('TEST-BAD-STATE', 'Bad', 'FLOOR', 1, 1, 'UNKNOWN')`,
         ),
       ).rejects.toThrow();
 
@@ -151,7 +181,10 @@ describe('bootstrap seam (Fastify + real PostgreSQL/TimescaleDB)', () => {
         'total_wound_length',
       ]);
     } finally {
-      await ctx.db.query(`DELETE FROM machines WHERE id = 'TEST-W-99'`);
+      await ctx.db.query(
+        `DELETE FROM machines WHERE id = ANY($1)`,
+        [['TEST-W-99', 'TEST-BAD-POS', 'TEST-DUP-POS', 'TEST-DUP-HW', 'TEST-BAD-STATE']],
+      );
     }
   });
 
